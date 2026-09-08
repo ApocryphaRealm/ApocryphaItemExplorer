@@ -1,0 +1,13 @@
+{
+  "name": "apocryphaitemexplorer-17",
+  "version-string": "1.0.0",
+  "description": "ApocryphaRealm Item Explorer - browse every loaded plugin and the items it adds, and take any of them, from an in-game page. No UIExtensions, no Papyrus, no plugin file.",
+  "homepage": "https://github.com/ApocryphaRealm/ApocryphaItemExplorer",
+  "license": "MIT",
+  "dependencies": [
+    "commonlibsse-ng",
+    "spdlog"
+  ],
+  "builtin-baseline": "127402f1c75bb3d5ff6bce04b285faa4930a5aca"
+}
+
