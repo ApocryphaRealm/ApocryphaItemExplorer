@@ -144,10 +144,12 @@ namespace DevBenchTool
 				a_write(a_sink, std::format(
 					R"({{"ok":true,"op":"previewstate","available":{},"showing":{},"formID":"0x{:08X}",)"
 					R"("loads":{},"frameDrawn":{},"rawOverride":{},)"
+					R"("sceneAvailable":{},"attached":{},"attaches":{},)"
 					R"("pane":{{"cx":{:.3f},"cy":{:.3f},"size":{:.3f},"x0":{:.0f},"y0":{:.0f},"x1":{:.0f},"y1":{:.0f}}},)"
 					R"("applied":{{"x":{:.2f},"y":{:.2f},"z":{:.2f},"scale":{:.3f}}}}})",
 					st.available ? "true" : "false", st.showing ? "true" : "false", st.currentFormID,
 					st.loads, st.frameDrawn ? "true" : "false", st.rawOverride ? "true" : "false",
+					st.sceneAvailable ? "true" : "false", st.attached ? "true" : "false", st.attaches,
 					settings::preview::paneX, settings::preview::paneY, settings::preview::paneSize,
 					st.paneX0, st.paneY0, st.paneX1, st.paneY1,
 					st.posX, st.posY, st.posZ, st.scale).c_str());

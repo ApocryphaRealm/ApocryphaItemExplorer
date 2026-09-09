@@ -10,17 +10,35 @@
 #include "utils/Strings.h"
 
 #include <algorithm>
+#include <mutex>
 
 namespace preview
 {
 	namespace
 	{
+		// THE SPLIT THAT MATTERS. The page's render function runs on the RENDER thread, inside the
+		// menu framework's Present hook. Everything below the line marked "main thread only" is
+		// game work - Begin3D, LoadInventoryItem, attaching to the UI scene - and it does not
+		// happen there. Measured 2026-09-09: called from the render thread, LoadInventoryItem
+		// returns without complaint and the model is never built (its NewInventoryMenuItemLoadTask
+		// never runs), so loadedModels stays empty and there is nothing to attach or draw. No
+		// warning, no crash, no picture. So the render thread only ever records a WISH, and an
+		// SKSE task carries it out on the main thread.
+		std::mutex   g_lock;                  // guards the wish below
 		RE::TESForm* g_requested = nullptr;   // what the page wants shown
+		float        g_wishX = 0.0F, g_wishY = 0.0F, g_wishZ = 0.0F, g_wishScale = 0.0F;
 		RE::TESForm* g_loaded = nullptr;      // what the game currently holds a model for
 		bool         g_begun = false;         // Begin3D has been called and End3D has not
 		std::uint32_t g_loads = 0;
 		std::uint32_t g_failures = 0;
 		bool         g_loggedUnavailable = false;
+		bool         g_loggedNoScene = false;
+
+		// What is currently attached to the game's UI 3D scene, and how many times we have
+		// attached - the counter is what a driving tool asserts on, because "a model is loaded"
+		// and "a model is in the scene being rendered" are different claims.
+		RE::NiAVObject* g_attached = nullptr;
+		std::uint32_t   g_attaches = 0;
 
 		// The RAW override, used to calibrate the mapping: a driving tool sweeps these and the
 		// numbers that land the model inside the pane become the INI's mapping constants. Zero
@@ -58,8 +76,19 @@ namespace preview
 			return mgr;
 		}
 
+		void Apply();  // main thread only - defined below Show/Hide
+
 		void Stop(RE::Inventory3DManager* a_mgr)
 		{
+			// The scene detach comes FIRST and happens whether or not the 3D manager is reachable:
+			// leaving our object parented into the game's menu scene after we stop showing it
+			// would keep it on screen with nothing owning it.
+			if (g_attached)
+			{
+				if (auto* scene = RE::UI3DSceneManager::GetSingleton()) { scene->DetachChild(g_attached); }
+				g_attached = nullptr;
+			}
+
 			if (!a_mgr) { return; }
 
 			if (g_loaded)
@@ -92,75 +121,174 @@ namespace preview
 
 	void Show(RE::TESForm* a_form)
 	{
+		std::scoped_lock guard(g_lock);
 		g_requested = a_form;
 	}
 
 	void Hide()
 	{
-		g_requested = nullptr;
+		{
+			std::scoped_lock guard(g_lock);
+			g_requested = nullptr;
+		}
 
-		// Torn down immediately rather than on the next Tick: Hide() is what the page calls when it
-		// stops being drawn, and there may not BE a next tick.
-		Stop(RE::Inventory3DManager::GetSingleton());
+		// The teardown is game work, so it goes to the main thread like everything else - but it is
+		// queued right now rather than waiting for a Tick, because Hide() is what the page calls
+		// when it stops being drawn and there may not BE another Tick.
+		if (auto* tasks = SKSE::GetTaskInterface()) { tasks->AddTask([]() { Apply(); }); }
+	}
+
+	namespace
+	{
+		// MAIN THREAD ONLY. Everything here is game work: it is queued by Tick() through the
+		// SKSE task interface and never called from the render thread.
+		void Apply()
+		{
+			if (!settings::general::show3DPreview)
+			{
+				if (g_loaded || g_begun) { Stop(RE::Inventory3DManager::GetSingleton()); }
+				return;
+			}
+
+			auto* mgr = Manager();
+			if (!mgr) { return; }
+
+			// One read of the wish, under the lock, so the whole of this pass works from a single
+			// consistent snapshot rather than from values the render thread may change halfway.
+			RE::TESForm* wanted = nullptr;
+			float        wx = 0.0F, wy = 0.0F, wz = 0.0F, wscale = 0.0F;
+			{
+				std::scoped_lock guard(g_lock);
+				wanted = g_requested;
+				wx = g_wishX; wy = g_wishY; wz = g_wishZ; wscale = g_wishScale;
+			}
+
+			if (!wanted)
+			{
+				Stop(mgr);
+				return;
+			}
+
+			if (wanted != g_loaded)
+			{
+				// A bound object is what the manager takes. Spells and other non-bound forms have no
+				// inventory model, so they are declined rather than pushed in and hoped for.
+				auto* bound = wanted->As<RE::TESBoundObject>();
+				if (!bound)
+				{
+					if (g_loaded) { Stop(mgr); }
+					std::scoped_lock guard(g_lock);
+					g_requested = nullptr;
+					return;
+				}
+
+				if (!g_begun)
+				{
+					mgr->Begin3D(RE::INTERFACE_LIGHT_SCHEME::kInventory);
+					g_begun = true;
+				}
+				else if (g_loaded)
+				{
+					mgr->UnloadInventoryItem();
+					g_loaded = nullptr;
+				}
+
+				mgr->LoadInventoryItem(bound, nullptr);
+				g_loaded = wanted;
+				++g_loads;
+
+				logger::debug("preview: showing {:08X} \"{}\"", g_loaded->GetFormID(), g_loaded->GetName());
+			}
+
+			// THE MODEL GOES INTO THE GAME'S OWN UI 3D SCENE, and the game draws it inside its own
+			// render pass. The first attempt asked Inventory3DManager to Render() from the menu
+			// framework's Present hook instead - measured 2026-09-09: the manager holds the model
+			// quite happily and nothing is ever composited, because by Present the pass that draw
+			// would have joined has already finished. UI3DSceneManager is the system the inventory
+			// itself renders through, so attaching to it puts the work where the engine expects it.
+			if (auto* scene = RE::UI3DSceneManager::GetSingleton())
+			{
+				RE::NiAVObject* model = nullptr;
+				auto&           models = mgr->GetRuntimeData().loadedModels;
+				if (models.size() > 0) { model = models[models.size() - 1].spModel.get(); }
+
+				if (model != g_attached)
+				{
+					if (g_attached) { scene->DetachChild(g_attached); }
+					g_attached = model;
+					if (g_attached)
+					{
+						scene->AttachChild(g_attached, RE::INTERFACE_LIGHT_SCHEME::kInventory);
+						++g_attaches;
+						logger::info("preview: attached \"{}\" to the UI 3D scene", g_loaded->GetName());
+					}
+				}
+
+				// The camera is the scene's, not the model's, so it is set every frame alongside the
+				// placement rather than once at attach time - the inventory moves it when it runs.
+				scene->SetCameraFOV(settings::preview::camFov);
+				scene->SetCameraPosition(RE::NiPoint3(settings::preview::camX, settings::preview::camY,
+													  settings::preview::camZ));
+			}
+			else if (!g_loggedNoScene)
+			{
+				// Rule 17: not fatal, not cached - a miss now is not a miss forever - but said once so
+				// an empty pane can be explained without guessing.
+				g_loggedNoScene = true;
+				logger::warn("preview: the UI 3D scene manager is not available; the model cannot be "
+							 "drawn on this runtime");
+			}
+
+			// Placement, re-applied every frame because the manager owns these and the inventory
+			// resets them when it runs.
+			//
+			// Two paths. The RAW override is the calibration path - a driving tool sets exact numbers
+			// and reads back where the model landed. Otherwise the placement is DERIVED from the pane
+			// the player positioned, through the linear mapping in the INI: the pane centre, in screen
+			// fractions, becomes a horizontal and a vertical offset at a fixed depth. The constants
+			// carry the signs, so an axis that runs the other way is an INI change, not a code change.
+			// The placement was worked out on the render thread and handed over with the wish; it is
+			// not recomputed here, so both threads can never disagree about where the model is.
+			const float x = wx, y = wy, z = wz, scale = wscale;
+
+			if (scale > 0.0F)
+			{
+				mgr->itemPos = RE::NiPoint3(x, y, z);
+				mgr->itemPosCopy = mgr->itemPos;
+				mgr->itemScale = scale;
+				mgr->itemScaleCopy = scale;
+
+				// Set on the OBJECT as well as on the manager. The manager applies its own copy during
+				// the Render() we no longer rely on, so with the attach path the object's own local
+				// transform is what actually decides where it sits and how big it is.
+				if (g_attached)
+				{
+					g_attached->local.translate = RE::NiPoint3(x, y, z);
+					g_attached->local.scale = scale;
+					RE::NiUpdateData update{};
+					g_attached->Update(update);
+				}
+			}
+			g_appliedX = x; g_appliedY = y; g_appliedZ = z; g_appliedScale = scale;
+
+			// Every frame while something is shown - this is what actually puts it on screen.
+			mgr->Render();
+		}
 	}
 
 	void Tick()
 	{
-		if (!settings::general::show3DPreview)
+		// RENDER THREAD. This records what the page wants and asks the main thread to do it.
+		// The work is queued every frame while a model is wanted but not yet attached, because
+		// the game builds the model on a task of its own and it is not ready on the frame it
+		// was asked for (rule 17 - a miss now is not a miss forever). Once it is attached the
+		// queueing stops on its own.
+		float x = 0.0F, y = 0.0F, z = 0.0F, scale = 0.0F;
+		if (g_rawScale > 0.0F)
 		{
-			if (g_loaded || g_begun) { Stop(RE::Inventory3DManager::GetSingleton()); }
-			return;
+			x = g_rawX; y = g_rawY; z = g_rawZ; scale = g_rawScale;
 		}
-
-		auto* mgr = Manager();
-		if (!mgr) { return; }
-
-		if (!g_requested)
-		{
-			Stop(mgr);
-			return;
-		}
-
-		if (g_requested != g_loaded)
-		{
-			// A bound object is what the manager takes. Spells and other non-bound forms have no
-			// inventory model, so they are declined rather than pushed in and hoped for.
-			auto* bound = g_requested->As<RE::TESBoundObject>();
-			if (!bound)
-			{
-				if (g_loaded) { Stop(mgr); }
-				g_requested = nullptr;
-				return;
-			}
-
-			if (!g_begun)
-			{
-				mgr->Begin3D(RE::INTERFACE_LIGHT_SCHEME::kInventory);
-				g_begun = true;
-			}
-			else if (g_loaded)
-			{
-				mgr->UnloadInventoryItem();
-				g_loaded = nullptr;
-			}
-
-			mgr->LoadInventoryItem(bound, nullptr);
-			g_loaded = g_requested;
-			++g_loads;
-
-			logger::debug("preview: showing {:08X} \"{}\"", g_loaded->GetFormID(), g_loaded->GetName());
-		}
-
-		// Placement, re-applied every frame because the manager owns these and the inventory
-		// resets them when it runs.
-		//
-		// Two paths. The RAW override is the calibration path - a driving tool sets exact numbers
-		// and reads back where the model landed. Otherwise the placement is DERIVED from the pane
-		// the player positioned, through the linear mapping in the INI: the pane centre, in screen
-		// fractions, becomes a horizontal and a vertical offset at a fixed depth. The constants
-		// carry the signs, so an axis that runs the other way is an INI change, not a code change.
-		float x = g_rawX, y = g_rawY, z = g_rawZ, scale = g_rawScale;
-		if (g_rawScale <= 0.0F)
+		else
 		{
 			x = settings::preview::mapDepth;
 			y = settings::preview::mapBaseY + (settings::preview::paneX - 0.5F) * settings::preview::mapSpanX;
@@ -168,17 +296,17 @@ namespace preview
 			scale = settings::preview::mapScale * (settings::preview::paneSize / 0.28F);
 		}
 
-		if (scale > 0.0F)
+		bool wanted = false;
 		{
-			mgr->itemPos = RE::NiPoint3(x, y, z);
-			mgr->itemPosCopy = mgr->itemPos;
-			mgr->itemScale = scale;
-			mgr->itemScaleCopy = scale;
+			std::scoped_lock guard(g_lock);
+			g_wishX = x; g_wishY = y; g_wishZ = z; g_wishScale = scale;
+			wanted = g_requested != nullptr;
 		}
-		g_appliedX = x; g_appliedY = y; g_appliedZ = z; g_appliedScale = scale;
 
-		// Every frame while something is shown - this is what actually puts it on screen.
-		mgr->Render();
+		if (!settings::general::show3DPreview) { wanted = false; }
+		if (!wanted && !g_attached && !g_begun) { return; }  // nothing wanted, nothing to undo
+
+		if (auto* tasks = SKSE::GetTaskInterface()) { tasks->AddTask([]() { Apply(); }); }
 	}
 
 	void DrawFrame()
@@ -283,6 +411,9 @@ namespace preview
 		PaneRect(s.paneX0, s.paneY0, s.paneX1, s.paneY1);
 		s.posX = g_appliedX; s.posY = g_appliedY; s.posZ = g_appliedZ; s.scale = g_appliedScale;
 		s.rawOverride = g_rawScale > 0.0F;
+		s.sceneAvailable = RE::UI3DSceneManager::GetSingleton() != nullptr;
+		s.attached = g_attached != nullptr;
+		s.attaches = g_attaches;
 		s.frameDrawn = g_frameDrawn;
 		return s;
 	}

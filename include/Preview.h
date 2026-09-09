@@ -77,6 +77,13 @@ namespace preview
 		float         posX = 0.0F, posY = 0.0F, posZ = 0.0F, scale = 0.0F;
 		bool          rawOverride = false;
 		bool          frameDrawn = false;
+
+		// "A model is loaded" and "a model is in the scene the game renders" are different claims,
+		// and the first one being true while the second was false is exactly what made the earlier
+		// attempt look like it was working. They are reported separately for that reason.
+		bool          sceneAvailable = false;
+		bool          attached = false;
+		std::uint32_t attaches = 0;
 	};
 
 	[[nodiscard]] Status GetStatus();

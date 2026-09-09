@@ -58,6 +58,15 @@ namespace settings
 		inline float mapSpanX = 40.0F;     // fMapSpanX:Preview
 		inline float mapSpanY = 22.5F;     // fMapSpanY:Preview
 		inline float mapScale = 1.0F;      // fMapScale:Preview - at the default pane size
+
+		// The UI 3D scene's camera. The model is attached to the game's own menu scene
+		// (UI3DSceneManager), which the game renders inside its own pass - the mod does not issue
+		// the draw itself, because a draw issued from the menu overlay happens after that pass has
+		// finished and produces nothing at all.
+		inline float camFov = 45.0F;       // fCamFov:Preview
+		inline float camX = 0.0F;          // fCamX:Preview
+		inline float camY = 0.0F;          // fCamY:Preview
+		inline float camZ = 0.0F;          // fCamZ:Preview
 	}
 
 	void Init(const std::string& a_iniFileName);

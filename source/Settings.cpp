@@ -41,6 +41,10 @@ namespace settings
 			float         mapSpanX;
 			float         mapSpanY;
 			float         mapScale;
+			float         camFov;
+			float         camX;
+			float         camY;
+			float         camZ;
 		} defaults{};
 
 		std::string Lower(std::string a_s)
@@ -130,6 +134,10 @@ namespace settings
 			get("fmapspanx:preview", preview::mapSpanX, ParseFloat);
 			get("fmapspany:preview", preview::mapSpanY, ParseFloat);
 			get("fmapscale:preview", preview::mapScale, ParseFloat);
+			get("fcamfov:preview", preview::camFov, ParseFloat);
+			get("fcamx:preview", preview::camX, ParseFloat);
+			get("fcamy:preview", preview::camY, ParseFloat);
+			get("fcamz:preview", preview::camZ, ParseFloat);
 			if (general::defaultCount == 0) { general::defaultCount = 1; }
 			// Clamped for the same reason SetPane clamps: a pane centred off-screen or sized to
 			// nothing is a preview nobody can find, and it looks exactly like a broken renderer.
@@ -181,7 +189,8 @@ namespace settings
 					 general::show3DPreview, general::showQuestItems, general::sortMode,
 					 preview::paneX, preview::paneY, preview::paneSize, preview::showFrame,
 					 preview::mapDepth, preview::mapBaseY, preview::mapBaseZ,
-					 preview::mapSpanX, preview::mapSpanY, preview::mapScale };
+					 preview::mapSpanX, preview::mapSpanY, preview::mapScale,
+					 preview::camFov, preview::camX, preview::camY, preview::camZ };
 
 		auto* collection = utils::INISettingCollection::GetSingleton();
 		collection->AddSettings(
@@ -200,7 +209,11 @@ namespace settings
 			utils::MakeSetting("fMapBaseZ:Preview", preview::mapBaseZ),
 			utils::MakeSetting("fMapSpanX:Preview", preview::mapSpanX),
 			utils::MakeSetting("fMapSpanY:Preview", preview::mapSpanY),
-			utils::MakeSetting("fMapScale:Preview", preview::mapScale));
+			utils::MakeSetting("fMapScale:Preview", preview::mapScale),
+			utils::MakeSetting("fCamFov:Preview", preview::camFov),
+			utils::MakeSetting("fCamX:Preview", preview::camX),
+			utils::MakeSetting("fCamY:Preview", preview::camY),
+			utils::MakeSetting("fCamZ:Preview", preview::camZ));
 
 		LoadFileValues();
 	}
@@ -239,6 +252,10 @@ namespace settings
 		ok &= WriteKey(lines, "Preview", "fMapSpanX", FloatText(preview::mapSpanX));
 		ok &= WriteKey(lines, "Preview", "fMapSpanY", FloatText(preview::mapSpanY));
 		ok &= WriteKey(lines, "Preview", "fMapScale", FloatText(preview::mapScale));
+		ok &= WriteKey(lines, "Preview", "fCamFov", FloatText(preview::camFov));
+		ok &= WriteKey(lines, "Preview", "fCamX", FloatText(preview::camX));
+		ok &= WriteKey(lines, "Preview", "fCamY", FloatText(preview::camY));
+		ok &= WriteKey(lines, "Preview", "fCamZ", FloatText(preview::camZ));
 
 		std::ofstream out(iniPath, std::ios::trunc);
 		if (!out) { logger::error("Save: could not open {} for writing", iniPath); return false; }
@@ -265,6 +282,10 @@ namespace settings
 		preview::mapSpanX = defaults.mapSpanX;
 		preview::mapSpanY = defaults.mapSpanY;
 		preview::mapScale = defaults.mapScale;
+		preview::camFov = defaults.camFov;
+		preview::camX = defaults.camX;
+		preview::camY = defaults.camY;
+		preview::camZ = defaults.camZ;
 		ApplyLogLevel();
 	}
 
