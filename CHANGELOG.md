@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.4 - 2026-09-09 - untested
+
+### Changed
+- The 3D preview is back in the build, switched on, and it is under test rather than shipped. 1.0.3 held it back because it drew nothing; this version exists to find out which part of how its menu is set up is wrong, and it must go back off before anything is finalized unless a capture shows a model.
+- The preview's menu is built from a configuration chosen at runtime instead of a fixed one. `uMenuRecipe` picks the flag set - 0 is InventoryMenu's own, which is what 1.0.3 tried; 1 is the one SKSE's own CustomMenu uses for item display; 2 is that without `kRendersOffscreenTargets`, to isolate that flag; 3 is both families at once. `uLoadMode` picks which overload builds the model. Every combination can now be tried in one game launch instead of one launch per guess.
+- The menu can be handed a movie that draws a small marker rectangle instead of the 20-byte blank one, controlled by `bMarkerMovie`. It is an instrument, not a feature: a capture with the marker missing means the game never composited this menu at all, and a capture with the marker present but no model means the compositing works and the model is genuinely absent. Every earlier run could not tell those two apart.
+- `itemexplorer.control op=config:<recipe>,<loadMode>,<marker>` sets all three and closes the menu so the next preview rebuilds it, which is what makes the sweep a single launch.
+
+### Why this build exists
+- A mod's own menu demonstrably CAN host the game's item 3D. UIExtensions ships `magicmenuext.swf`, a non-vanilla menu whose ActionScript drives `UpdateItem3D`; of every UIExtensions movie installed it is the only one that references it. The vanilla container, inventory, barter and gift movies each carry the same three calls, and magic, favourites and crafting carry none. So this was never a question of whether it is possible.
+- One earlier conclusion is corrected here rather than left standing. The SKSE source tree vendored in another of this project's ports declares `Inventory3DManager::UpdateItem3D`, `UpdateMagic3D` and `Clear3D`, which look like engine entry points CommonLibSSE-NG never bound. They are not: they are the same functions CommonLibSSE-NG exposes as the two `LoadInventoryItem` overloads and `UnloadInventoryItem`, under different reverse-engineered names. The two overloads sit +0x30 apart in both trees, in the same order, with the same `InventoryEntryData*` first parameter; the absolute offsets differ only because that tree targets an older Skyrim build. The same trap applies to `IMenu::Render`, which is vtable slot 06 - the slot CommonLibSSE-NG calls `PostDisplay`.
+
 ## 1.0.3 - 2026-09-09 - working
 
 ### Added

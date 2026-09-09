@@ -14,6 +14,7 @@
 #include "Catalog.h"
 #include "DevBenchTool.h"
 #include "Settings.h"
+#include "PreviewMenu.h"
 #include "UI.h"
 
 #include "utils/Logger.h"
@@ -33,6 +34,7 @@ namespace
 			strings::Configure("ApocryphaItemExplorer");
 			favourites::Resolve();
 			UI::Register();
+			preview::RegisterPreviewMenu();
 			DevBenchTool::Init(true);
 			// The catalogue is NOT built here. Walking every form array costs real time on a large
 			// load order, and nothing needs the answer until someone opens the page or asks the
