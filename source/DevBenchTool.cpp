@@ -143,6 +143,16 @@ namespace DevBenchTool
 			//                    menu that genuinely renders that scene. The two together are the
 			//                    comparison: same object, one context that works and one that does not.
 			// op=scanmenu - the game's InventoryMenu::PreDisplay, and everything it calls.
+			// op=fx:<MenuName> - the GameDelegate callbacks a live menu has registered.
+			if (const auto at = args.find("fx:"); at != std::string_view::npos)
+			{
+				std::string name(args.substr(at + 3));
+				const auto end = name.find_first_of("\"},");
+				if (end != std::string::npos) { name = name.substr(0, end); }
+				a_write(a_sink, std::format(R"({{"ok":true,"op":"fx","fx":{}}})",
+											preview::FxCallbacks(name)).c_str());
+				return;
+			}
 			// op=dump:<hex offset>:<length> - raw bytes from the running module, for disassembly.
 			if (const auto at = args.find("dump:"); at != std::string_view::npos)
 			{

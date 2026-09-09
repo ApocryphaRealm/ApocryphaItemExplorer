@@ -129,6 +129,11 @@ namespace preview
 	// Steam-packed, so the same bytes cannot be found by disassembling the file (PREFLIGHT).
 	[[nodiscard]] std::string ScanInventoryPreDisplay();
 
+	// Every GameDelegate callback a live menu has registered, with the address of each handler.
+	// This is how the inventory's own "UpdateItem3D" is located: the game's ActionScript calls it
+	// to show an item, so whatever it does is what a mod has to do too.
+	[[nodiscard]] std::string FxCallbacks(const std::string& a_menuName);
+
 	// Hand back raw bytes from the running module, as hex, for disassembly outside the game.
 	// The on-disk exe is Steam-packed, so this is the only place those bytes exist (PREFLIGHT).
 	// Read-only, bounded, and a test hook - nothing the page uses.

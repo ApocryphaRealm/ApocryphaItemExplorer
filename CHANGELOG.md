@@ -41,8 +41,19 @@ engine renders the item because the menu's ActionScript asks it to - not because
 right flags. That also explains why `LoadInventoryItem` never built anything for us: the model is
 built inside the `UpdateItem3D` handler, which only an item menu registers.
 
-So the next step is not another flag or another address: it is to drive that same path - a movie of
-ours that makes the call, or our own C++ doing what that handler does.
+That handler was then read directly. Its address comes from the LIVE InventoryMenu's `fxDelegate`,
+which lists every GameDelegate callback a menu has registered; `UpdateItem3D` sits at +0x88DFD0 on
+1.5.97. Disassembled, it is short and plain: on a false argument it calls
+`Inventory3DManager::UnloadInventoryItem` (id 50886); on a true one it takes the selected entry out
+of the menu's own list and tail-calls **`Inventory3DManager::LoadInventoryItem(InventoryEntryData*)`
+- id 50884, the ONE-ARGUMENT overload**. Every attempt here had used id 50885, the
+`(TESBoundObject*, ExtraDataList*)` overload, which the game never calls.
+
+Switching to the one-argument overload with an entry we build ourselves is what the code now does,
+because it is what the game does - and `loadedModels` is STILL empty. The remaining difference is
+visible in that same disassembly: the entry the game passes comes out of the menu's own item list
+(`[handler+0x48]`, then id 50086, then `[rax+8]`), so a synthetic `InventoryEntryData` is evidently
+not equivalent to one the item menu owns. That is where the next attempt should start.
 
 ### Fixed
 - The DevBench tool could not drive the 3D preview at all. Its `preview:` and `place:` ops had been written INSIDE the `find:` branch, so they only answered when the arguments also contained `find:` - which is how the preview reached a release without anyone having seen it draw. They are top-level ops now, joined by `pane:` and `previewstate`.

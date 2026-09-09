@@ -121,6 +121,11 @@ namespace preview
 		// currentlightScheme at +0x90, r8 a camera pointer that falls back to this->camera when
 		// null, r9b a flag - so it is called here with the scene's own camera.
 		RenderUIScene();
+
+		// And the 3D manager's own render, which draws the models IT holds. Those are now populated
+		// the way the game populates them (the one-argument LoadInventoryItem), so unlike every
+		// earlier attempt this call has something to draw.
+		if (auto* mgr = RE::Inventory3DManager::GetSingleton()) { mgr->Render(); }
 	}
 
 	void RegisterPreviewMenu()

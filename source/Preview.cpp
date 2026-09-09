@@ -14,6 +14,7 @@
 #include <cctype>
 #include <cstring>
 #include <format>
+#include <memory>
 #include <mutex>
 #include <string>
 
@@ -49,6 +50,10 @@ namespace preview
 		// loadedModels empty every time, with no warning and no picture (measured 2026-09-09,
 		// four runs). Loading the NIF ourselves has no such precondition.
 		RE::NiPointer<RE::NiNode> g_model;
+
+		// The entry handed to the 3D manager. It has to outlive the call - the manager keeps a
+		// reference to what it was given - so it is owned here rather than made on the stack.
+		std::unique_ptr<RE::InventoryEntryData> g_entry;
 		RE::NiAVObject*           g_attached = nullptr;
 		std::uint32_t             g_attaches = 0;
 		std::string               g_modelPath;
@@ -125,6 +130,7 @@ namespace preview
 				g_attached = nullptr;
 			}
 			g_model.reset();
+			g_entry.reset();
 			g_modelPath.clear();
 			SetPreviewMenuOpen(false);
 
@@ -261,15 +267,21 @@ namespace preview
 				// something to show, so nothing of ours is on the UI stack while the page is idle.
 				SetPreviewMenuOpen(true);
 
-				// AND ask the 3D manager for the same item. Its Render() - which our menu now calls
-				// from PreDisplay, inside the game's render pass - draws the models IT holds, not
-				// whatever is parented into the scene, so it needs its own copy. This is the call
-				// that used to leave loadedModels empty; the difference now is that a menu marked
-				// kInventoryItemMenu is open, which is the family whose model-load task the game
-				// actually pumps. previewstate reports managerModels so this is measured, not hoped.
+				// AND ask the 3D manager for the same item, THE WAY THE GAME ASKS.
+				//
+				// The game's own UpdateItem3D handler was disassembled out of the running process
+				// (its address read from the live InventoryMenu's fxDelegate): on a true argument
+				// it fetches the selected entry and tail-calls Inventory3DManager::LoadInventoryItem
+				// with an INVENTORY ENTRY - Address Library id 50884, the one-argument overload.
+				//
+				// Every earlier attempt here used the OTHER overload, id 50885, which takes a bound
+				// object and an extra-data list. The game never calls that one, and loadedModels
+				// stayed empty every single time. So this builds an entry, exactly as the item
+				// menus do, and hands that over instead.
 				if (auto* bound = wanted->As<RE::TESBoundObject>())
 				{
-					mgr->LoadInventoryItem(bound, nullptr);
+					g_entry = std::make_unique<RE::InventoryEntryData>(bound, 1);
+					mgr->LoadInventoryItem(g_entry.get());
 				}
 
 				g_model = node;
@@ -577,6 +589,34 @@ namespace preview
 				out += std::format(R"({{"slot":{},"fn":"0x{:X}","at":{},"target":"0x{:X}"}})",
 								   slot, fn - base, i, off);
 			}
+		}
+		out += "]}";
+		return out;
+	}
+
+	std::string FxCallbacks(const std::string& a_menuName)
+	{
+		auto* ui = RE::UI::GetSingleton();
+		if (!ui) { return R"({"error":"no UI"})"; }
+
+		auto menu = ui->GetMenu(a_menuName);
+		if (!menu) { return std::format(R"({{"error":"menu not open","menu":"{}"}})", a_menuName); }
+
+		auto* fx = menu->fxDelegate.get();
+		if (!fx) { return std::format(R"({{"error":"menu has no fxDelegate","menu":"{}"}})", a_menuName); }
+
+		const auto base = REL::Module::get().base();
+		std::string out = std::format(R"({{"menu":"{}","callbacks":[)", a_menuName);
+		bool first = true;
+		for (const auto& entry : fx->callbacks)
+		{
+			const char* name = entry.first.data();
+			const auto* fn = reinterpret_cast<const std::uint8_t*>(entry.second.callback);
+			if (!first) { out += ','; }
+			first = false;
+			out += std::format(R"({{"name":"{}","fn":"0x{:X}"}})",
+							   name ? name : "?",
+							   fn ? (reinterpret_cast<std::uintptr_t>(fn) - base) : 0);
 		}
 		out += "]}";
 		return out;
