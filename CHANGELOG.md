@@ -6,9 +6,20 @@
 - Favourites. A star beside every item adds it to a second tab of its own, so a short list of things you keep coming back to does not have to be searched for again. The list is kept between sessions and stored as plugin name plus local form ID rather than a raw form ID, so it survives changes to your load order; anything whose plugin is gone is dropped with a line in the log rather than silently pointing at something else.
 - Sorting: name A-Z, name Z-A, value highest or lowest first, weight heaviest or lightest first. Ties fall back to the name so the order is stable. The Favourites tab follows the same setting, so switching tabs does not reshuffle everything.
 - Quest items are found and marked. Every loaded quest's aliases are walked at catalogue build time and an alias the game itself flags as a quest object marks the form it points at - 288 of them in a vanilla-plus-mods load order. They are tagged [quest] wherever they appear, because taking one can confuse the quest that owns it, and they can be hidden entirely with a switch.
-- A 3D preview of the selected item, drawn by the game's own inventory renderer - the same one that shows an item when you highlight it in your inventory. Click a row to select it. One item at a time, because that is how that renderer works.
+- A 3D preview of the selected item, asked of the game's own inventory renderer - the same one that shows an item when you highlight it in your inventory. Click a row to select it. One item at a time, because that is how that renderer works. **PROVEN NOT TO DRAW, 2026-09-09** - see Known limitation below; the plumbing is in and the picture is not.
 - The preview has a PANE you can put where you like, marked with corner brackets and the item's name above it. It has to be movable, and it defaults to the right of the screen, because the model is drawn by the game earlier in the frame than this page is drawn over it: wherever the two overlap the page wins and the model is behind it. Nothing is painted inside the brackets for the same reason - a backing plate there would hide what it frames. The brackets and the caption use the framework's screen-wide drawing (Apocrypha Menu Framework 1.5.8 and later), the same mechanism SkyHUD Settings Menu marks HUD positions with.
 - Pane controls on the page - across, down, size, and a switch for the brackets - and the pane, the mapping from it to the renderer's own units, and the model's placement are all kept in the INI, so where you put it survives a restart.
+
+### Known limitation - the 3D preview does not appear yet
+Measured on Test Build (SE 1.5.97) 2026-09-09 03:52, one launch, six captures. Every part around
+the model works: `Inventory3DManager` is reached, `Begin3D` and `LoadInventoryItem` succeed with no
+warning, the tool reports `showing=true loads=1`, the placement is applied every frame, and the
+pane's corner brackets and the item's name draw correctly over the menu window. **No model is
+composited into the frame at any placement** - centre, offset on either axis, or at double depth.
+`Inventory3DManager::Render()` is being called from inside the menu framework's DXGI Present hook,
+which is after the game's own render pass has run, so the call has nothing to draw into. Getting a
+picture needs the mod to own the render - its own target and camera, handed to the page as a
+texture - not a better placement. Until then this is plumbing, not a feature.
 
 ### Fixed
 - The DevBench tool could not drive the 3D preview at all. Its `preview:` and `place:` ops had been written INSIDE the `find:` branch, so they only answered when the arguments also contained `find:` - which is how the preview reached a release without anyone having seen it draw. They are top-level ops now, joined by `pane:` and `previewstate`.
