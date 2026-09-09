@@ -31,6 +31,35 @@ namespace settings
 		inline std::uint32_t sortMode = 0;       // uSortMode:General
 	}
 
+	// Where the 3D preview appears, and how a place on the screen becomes a place in the game's
+	// inventory renderer.
+	//
+	// The model is drawn by the game, earlier in the frame than the menu is composited, so the
+	// menu window covers it wherever the two overlap. The pane is therefore positioned by the
+	// player, and it defaults to the right-hand side of the screen, clear of a centred window.
+	namespace preview
+	{
+		// The pane, in fractions of the screen: centre, then height (the pane is square).
+		inline float paneX = 0.80F;        // fPaneX:Preview
+		inline float paneY = 0.50F;        // fPaneY:Preview
+		inline float paneSize = 0.28F;     // fPaneSize:Preview
+
+		// The corner brackets and the caption that mark the pane. Off leaves the model unframed.
+		inline bool showFrame = true;      // bShowFrame:Preview
+
+		// The mapping from the pane to RE::Inventory3DManager::itemPos, which is in the renderer's
+		// own units and not in pixels. It is linear: a fixed depth, plus a horizontal and a
+		// vertical offset taken from how far the pane centre sits from the middle of the screen.
+		// The spans carry the SIGN, so an axis that runs the other way on some runtime is an INI
+		// change rather than a rebuild.
+		inline float mapDepth = 25.0F;     // fMapDepth:Preview
+		inline float mapBaseY = 0.0F;      // fMapBaseY:Preview
+		inline float mapBaseZ = 0.0F;      // fMapBaseZ:Preview
+		inline float mapSpanX = 40.0F;     // fMapSpanX:Preview
+		inline float mapSpanY = 22.5F;     // fMapSpanY:Preview
+		inline float mapScale = 1.0F;      // fMapScale:Preview - at the default pane size
+	}
+
 	void Init(const std::string& a_iniFileName);
 	bool Reload();
 	bool Save();

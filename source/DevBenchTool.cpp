@@ -3,6 +3,8 @@
 #include "DevBenchTool.h"
 
 #include "Catalog.h"
+#include "UI.h"
+#include "Preview.h"
 #include "DevBench/DevBenchAPI.h"
 #include "Settings.h"
 
@@ -89,6 +91,66 @@ namespace DevBenchTool
 				}
 				json += "]}";
 				a_write(a_sink, json.c_str());
+				return;
+			}
+
+			// op=preview:<hex form id> - point the 3D preview at a form with no mouse click.
+			// op=pane:cx,cy,size       - move the pane the model is placed inside, in screen fractions.
+			// op=place:x,y,z,scale     - the RAW placement override, in the 3D manager's own units,
+			//                            which is how the pane-to-model mapping is calibrated; a scale
+			//                            of 0 clears the override and hands placement back to the pane.
+			// op=previewstate          - what is shown, where the pane is in pixels, and what was last
+			//                            handed to the 3D manager.
+			//
+			// These sat INSIDE the find: branch until 2026-09-09, so they only answered when the
+			// arguments also contained "find:" - which is why nothing had ever driven the preview.
+			if (const auto at = args.find("preview:"); at != std::string_view::npos)
+			{
+				const std::string idText(args.substr(at + 8, 8));
+				RE::FormID id = 0;
+				try { id = static_cast<RE::FormID>(std::stoul(idText, nullptr, 16)); } catch (...) {}
+				RE::TESForm* form = id ? RE::TESForm::LookupByID(id) : nullptr;
+				UI::SelectForPreview(form);
+				a_write(a_sink, std::format(R"({{"ok":{},"op":"preview","formID":"0x{:08X}"}})",
+											form ? "true" : "false", id).c_str());
+				return;
+			}
+			if (const auto at = args.find("pane:"); at != std::string_view::npos)
+			{
+				float cx = 0, cy = 0, size = 0;
+				std::sscanf(std::string(args.substr(at + 5, 48)).c_str(), "%f,%f,%f", &cx, &cy, &size);
+				preview::SetPane(cx, cy, size);
+				float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+				const bool known = preview::GetPaneRect(x0, y0, x1, y1);
+				a_write(a_sink, std::format(
+					R"({{"ok":true,"op":"pane","cx":{:.3f},"cy":{:.3f},"size":{:.3f},"rectKnown":{},)"
+					R"("x0":{:.0f},"y0":{:.0f},"x1":{:.0f},"y1":{:.0f}}})",
+					settings::preview::paneX, settings::preview::paneY, settings::preview::paneSize,
+					known ? "true" : "false", x0, y0, x1, y1).c_str());
+				return;
+			}
+			if (const auto at = args.find("place:"); at != std::string_view::npos)
+			{
+				float x = 0, y = 0, z = 0, sc = 0;
+				std::sscanf(std::string(args.substr(at + 6, 48)).c_str(), "%f,%f,%f,%f", &x, &y, &z, &sc);
+				preview::SetPlacement(x, y, z, sc);
+				a_write(a_sink, std::format(R"({{"ok":true,"op":"place","x":{:.1f},"y":{:.1f},"z":{:.1f},"scale":{:.3f}}})",
+											x, y, z, sc).c_str());
+				return;
+			}
+			if (has("previewstate"))
+			{
+				const auto st = preview::GetStatus();
+				a_write(a_sink, std::format(
+					R"({{"ok":true,"op":"previewstate","available":{},"showing":{},"formID":"0x{:08X}",)"
+					R"("loads":{},"frameDrawn":{},"rawOverride":{},)"
+					R"("pane":{{"cx":{:.3f},"cy":{:.3f},"size":{:.3f},"x0":{:.0f},"y0":{:.0f},"x1":{:.0f},"y1":{:.0f}}},)"
+					R"("applied":{{"x":{:.2f},"y":{:.2f},"z":{:.2f},"scale":{:.3f}}}}})",
+					st.available ? "true" : "false", st.showing ? "true" : "false", st.currentFormID,
+					st.loads, st.frameDrawn ? "true" : "false", st.rawOverride ? "true" : "false",
+					settings::preview::paneX, settings::preview::paneY, settings::preview::paneSize,
+					st.paneX0, st.paneY0, st.paneX1, st.paneY1,
+					st.posX, st.posY, st.posZ, st.scale).c_str());
 				return;
 			}
 
@@ -208,7 +270,13 @@ namespace DevBenchTool
 			"op=find:<text> searches every plugin at once by item name or editor ID, capped at 60 results, hiding enchanted variants of equipment the way the page does; op=findall:<text> is the same but includes them. "
 			"op=give:<hex formID>[:<count>] puts an item in the player's inventory through the game's own "
 			"path, queued onto the main thread; a spell is taught instead of added. op=reload re-reads the "
-			"INI. No argument reports settings and whether the catalogue has been built yet.\","
+			"INI. No argument reports settings and whether the catalogue has been built yet. "
+			"The 3D preview: op=preview:<hex formID> selects the form the preview follows, without a "
+			"mouse click; op=pane:<cx>,<cy>,<size> moves the pane it is drawn inside, in fractions of "
+			"the screen; op=place:<x>,<y>,<z>,<scale> is the raw placement override in the renderer's "
+			"own units, which is how the pane-to-model mapping is calibrated, and a scale of 0 clears "
+			"it; op=previewstate reports what is showing, the pane in pixels, and what was last handed "
+			"to the game's 3D manager.\","
 			"\"inputSchema\":{\"type\":\"object\",\"properties\":{\"op\":{\"type\":\"string\"}}},"
 			"\"readOnly\":false"
 			"}";
