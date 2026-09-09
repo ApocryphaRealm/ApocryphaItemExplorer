@@ -28,25 +28,8 @@ namespace settings
 			std::uint32_t logLevel;
 			std::uint32_t defaultCount;
 			bool          includeSpells;
-			bool          show3DPreview;
 			bool          showQuestItems;
 			std::uint32_t sortMode;
-			float         paneX;
-			float         paneY;
-			float         paneSize;
-			bool          showFrame;
-			float         mapDepth;
-			float         mapBaseY;
-			float         mapBaseZ;
-			float         mapSpanX;
-			float         mapSpanY;
-			float         mapScale;
-			bool          overrideCamera;
-			float         camFov;
-			float         camX;
-			float         camY;
-			float         camZ;
-			std::uint32_t scheme;
 		} defaults{};
 
 		std::string Lower(std::string a_s)
@@ -123,44 +106,15 @@ namespace settings
 			get("uloglevel:debug", debug::logLevel, ParseUInt);
 			get("udefaultcount:general", general::defaultCount, ParseUInt);
 			get("bincludespells:general", general::includeSpells, ParseBool);
-			get("bshow3dpreview:general", general::show3DPreview, ParseBool);
 			get("bshowquestitems:general", general::showQuestItems, ParseBool);
 			get("usortmode:general", general::sortMode, ParseUInt);
-			get("fpanex:preview", preview::paneX, ParseFloat);
-			get("fpaney:preview", preview::paneY, ParseFloat);
-			get("fpanesize:preview", preview::paneSize, ParseFloat);
-			get("bshowframe:preview", preview::showFrame, ParseBool);
-			get("fmapdepth:preview", preview::mapDepth, ParseFloat);
-			get("fmapbasey:preview", preview::mapBaseY, ParseFloat);
-			get("fmapbasez:preview", preview::mapBaseZ, ParseFloat);
-			get("fmapspanx:preview", preview::mapSpanX, ParseFloat);
-			get("fmapspany:preview", preview::mapSpanY, ParseFloat);
-			get("fmapscale:preview", preview::mapScale, ParseFloat);
-			get("boverridecamera:preview", preview::overrideCamera, ParseBool);
-			get("fcamfov:preview", preview::camFov, ParseFloat);
-			get("fcamx:preview", preview::camX, ParseFloat);
-			get("fcamy:preview", preview::camY, ParseFloat);
-			get("fcamz:preview", preview::camZ, ParseFloat);
-			get("uscheme:preview", preview::scheme, ParseUInt);
-			if (preview::scheme > 7) { preview::scheme = 1; }
 			if (general::defaultCount == 0) { general::defaultCount = 1; }
-			// Clamped for the same reason SetPane clamps: a pane centred off-screen or sized to
-			// nothing is a preview nobody can find, and it looks exactly like a broken renderer.
-			preview::paneX = std::clamp(preview::paneX, 0.05F, 0.95F);
-			preview::paneY = std::clamp(preview::paneY, 0.05F, 0.95F);
-			preview::paneSize = std::clamp(preview::paneSize, 0.08F, 0.90F);
 			// Clamped rather than trusted: an out-of-range sort index read from a hand-edited INI
 			// would index past the end of the mode table.
 			if (general::sortMode >= static_cast<std::uint32_t>(Catalog::Sort::kCount)) { general::sortMode = 0; }
-			logger::info("settings loaded from {}: defaultCount={} includeSpells={} preview3D={} "
+			logger::info("settings loaded from {}: defaultCount={} includeSpells={} "
 						 "questItems={} sortMode={} logLevel={}",
-						 iniPath, general::defaultCount, general::includeSpells, general::show3DPreview,
-						 general::showQuestItems, general::sortMode, debug::logLevel);
-			logger::info("preview pane: ({:.3f}, {:.3f}) size {:.3f} frame={} | mapping depth={:.1f} "
-						 "base=({:.1f}, {:.1f}) span=({:.1f}, {:.1f}) scale={:.3f}",
-						 preview::paneX, preview::paneY, preview::paneSize, preview::showFrame,
-						 preview::mapDepth, preview::mapBaseY, preview::mapBaseZ,
-						 preview::mapSpanX, preview::mapSpanY, preview::mapScale);
+						 iniPath, general::defaultCount, general::includeSpells, 						 general::showQuestItems, general::sortMode, debug::logLevel);
 			return true;
 		}
 
@@ -191,37 +145,15 @@ namespace settings
 		iniPath = (std::filesystem::current_path() / "Data" / "SKSE" / "Plugins" / a_iniFileName).string();
 
 		defaults = { debug::logLevel, general::defaultCount, general::includeSpells,
-					 general::show3DPreview, general::showQuestItems, general::sortMode,
-					 preview::paneX, preview::paneY, preview::paneSize, preview::showFrame,
-					 preview::mapDepth, preview::mapBaseY, preview::mapBaseZ,
-					 preview::mapSpanX, preview::mapSpanY, preview::mapScale,
-					 preview::overrideCamera, preview::camFov, preview::camX, preview::camY,
-					 preview::camZ, preview::scheme };
+					 general::showQuestItems, general::sortMode };
 
 		auto* collection = utils::INISettingCollection::GetSingleton();
 		collection->AddSettings(
 			utils::MakeSetting("uLogLevel:Debug", static_cast<unsigned int>(debug::logLevel)),
 			utils::MakeSetting("uDefaultCount:General", static_cast<unsigned int>(general::defaultCount)),
 			utils::MakeSetting("bIncludeSpells:General", general::includeSpells),
-			utils::MakeSetting("bShow3DPreview:General", general::show3DPreview),
 			utils::MakeSetting("bShowQuestItems:General", general::showQuestItems),
-			utils::MakeSetting("uSortMode:General", static_cast<unsigned int>(general::sortMode)),
-			utils::MakeSetting("fPaneX:Preview", preview::paneX),
-			utils::MakeSetting("fPaneY:Preview", preview::paneY),
-			utils::MakeSetting("fPaneSize:Preview", preview::paneSize),
-			utils::MakeSetting("bShowFrame:Preview", preview::showFrame),
-			utils::MakeSetting("fMapDepth:Preview", preview::mapDepth),
-			utils::MakeSetting("fMapBaseY:Preview", preview::mapBaseY),
-			utils::MakeSetting("fMapBaseZ:Preview", preview::mapBaseZ),
-			utils::MakeSetting("fMapSpanX:Preview", preview::mapSpanX),
-			utils::MakeSetting("fMapSpanY:Preview", preview::mapSpanY),
-			utils::MakeSetting("fMapScale:Preview", preview::mapScale),
-			utils::MakeSetting("bOverrideCamera:Preview", preview::overrideCamera),
-			utils::MakeSetting("fCamFov:Preview", preview::camFov),
-			utils::MakeSetting("fCamX:Preview", preview::camX),
-			utils::MakeSetting("fCamY:Preview", preview::camY),
-			utils::MakeSetting("fCamZ:Preview", preview::camZ),
-			utils::MakeSetting("uScheme:Preview", static_cast<unsigned int>(preview::scheme)));
+			utils::MakeSetting("uSortMode:General", static_cast<unsigned int>(general::sortMode)));
 
 		LoadFileValues();
 	}
@@ -247,25 +179,8 @@ namespace settings
 		ok &= WriteKey(lines, "Debug", "uLogLevel", std::to_string(debug::logLevel));
 		ok &= WriteKey(lines, "General", "uDefaultCount", std::to_string(general::defaultCount));
 		ok &= WriteKey(lines, "General", "bIncludeSpells", general::includeSpells ? "1" : "0");
-		ok &= WriteKey(lines, "General", "bShow3DPreview", general::show3DPreview ? "1" : "0");
 		ok &= WriteKey(lines, "General", "bShowQuestItems", general::showQuestItems ? "1" : "0");
 		ok &= WriteKey(lines, "General", "uSortMode", std::to_string(general::sortMode));
-		ok &= WriteKey(lines, "Preview", "fPaneX", FloatText(preview::paneX));
-		ok &= WriteKey(lines, "Preview", "fPaneY", FloatText(preview::paneY));
-		ok &= WriteKey(lines, "Preview", "fPaneSize", FloatText(preview::paneSize));
-		ok &= WriteKey(lines, "Preview", "bShowFrame", preview::showFrame ? "1" : "0");
-		ok &= WriteKey(lines, "Preview", "fMapDepth", FloatText(preview::mapDepth));
-		ok &= WriteKey(lines, "Preview", "fMapBaseY", FloatText(preview::mapBaseY));
-		ok &= WriteKey(lines, "Preview", "fMapBaseZ", FloatText(preview::mapBaseZ));
-		ok &= WriteKey(lines, "Preview", "fMapSpanX", FloatText(preview::mapSpanX));
-		ok &= WriteKey(lines, "Preview", "fMapSpanY", FloatText(preview::mapSpanY));
-		ok &= WriteKey(lines, "Preview", "fMapScale", FloatText(preview::mapScale));
-		ok &= WriteKey(lines, "Preview", "bOverrideCamera", preview::overrideCamera ? "1" : "0");
-		ok &= WriteKey(lines, "Preview", "fCamFov", FloatText(preview::camFov));
-		ok &= WriteKey(lines, "Preview", "fCamX", FloatText(preview::camX));
-		ok &= WriteKey(lines, "Preview", "fCamY", FloatText(preview::camY));
-		ok &= WriteKey(lines, "Preview", "fCamZ", FloatText(preview::camZ));
-		ok &= WriteKey(lines, "Preview", "uScheme", std::to_string(preview::scheme));
 
 		std::ofstream out(iniPath, std::ios::trunc);
 		if (!out) { logger::error("Save: could not open {} for writing", iniPath); return false; }
@@ -279,25 +194,8 @@ namespace settings
 		debug::logLevel = defaults.logLevel;
 		general::defaultCount = defaults.defaultCount;
 		general::includeSpells = defaults.includeSpells;
-		general::show3DPreview = defaults.show3DPreview;
 		general::showQuestItems = defaults.showQuestItems;
 		general::sortMode = defaults.sortMode;
-		preview::paneX = defaults.paneX;
-		preview::paneY = defaults.paneY;
-		preview::paneSize = defaults.paneSize;
-		preview::showFrame = defaults.showFrame;
-		preview::mapDepth = defaults.mapDepth;
-		preview::mapBaseY = defaults.mapBaseY;
-		preview::mapBaseZ = defaults.mapBaseZ;
-		preview::mapSpanX = defaults.mapSpanX;
-		preview::mapSpanY = defaults.mapSpanY;
-		preview::mapScale = defaults.mapScale;
-		preview::overrideCamera = defaults.overrideCamera;
-		preview::camFov = defaults.camFov;
-		preview::camX = defaults.camX;
-		preview::camY = defaults.camY;
-		preview::camZ = defaults.camZ;
-		preview::scheme = defaults.scheme;
 		ApplyLogLevel();
 	}
 

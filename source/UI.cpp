@@ -6,7 +6,6 @@
 
 #include "Catalog.h"
 #include "Favourites.h"
-#include "Preview.h"
 #include "Settings.h"
 
 #include "utils/Logger.h"
@@ -59,18 +58,8 @@ namespace UI
 		bool        g_kindInit = false;
 		std::string g_status;
 
-		// What the 3D preview is following. A raw pointer into the catalogue, which lives as long
-		// as the catalogue does; cleared whenever the catalogue is rebuilt.
-		RE::TESForm* g_selectedForm = nullptr;
 	}
 
-	// Exposed for the DevBench tool (rule 64). Selecting a row is normally a click, and a click is
-	// exactly what a headless test cannot do - which is how the 3D preview reached a release
-	// without anyone having seen it draw.
-	void SelectForPreview(RE::TESForm* a_form)
-	{
-		g_selectedForm = a_form;
-	}
 
 	namespace
 	{
@@ -104,12 +93,7 @@ namespace UI
 			"igGetCursorScreenPos", "igGetWindowDrawList", "igGetFrameHeight",
 			"igInvisibleButton", "igIsItemHovered",
 			"ImDrawList_AddRectFilled", "ImDrawList_AddCircleFilled",
-			// the 3D preview's pane: its corners and caption are drawn on the framework's
-			// SCREEN-WIDE foreground list, which arrived in Apocrypha Menu Framework 1.5.8.
-			// A framework older than that is refused here rather than met with a null call.
-			"igGetIO", "igGetForegroundDrawList_Nil",
-			"ImDrawList_AddLine", "ImDrawList_AddText_Vec2",
-			"igSliderFloat", "igCombo_Str_arr"
+			"igCombo_Str_arr"
 		};
 
 		bool HasRequiredExports()
@@ -175,33 +159,7 @@ namespace UI
 			ImGuiMCP::TextDisabled("%s", strings::TR("AIE_QuestHint",
 								   "items a quest calls its own - always tagged [quest] when shown"));
 
-			ImGuiMCP::Toggle(strings::TR("AIE_Show3D", "Show the selected item in 3D"),
-							 &settings::general::show3DPreview);
 
-			if (settings::general::show3DPreview)
-			{
-				// Where the model appears. It has to be movable, and it has to be movable to
-				// somewhere this window is not: the model is drawn by the game earlier in the
-				// frame than this menu is composited, so wherever the two overlap, the menu wins
-				// and the model is behind it.
-				ImGuiMCP::TextDisabled("%s", strings::TR("AIE_PreviewWhere",
-									   "the model is drawn behind this window - put its pane somewhere clear of it"));
-
-				float cx = settings::preview::paneX;
-				float cy = settings::preview::paneY;
-				float size = settings::preview::paneSize;
-				bool  moved = false;
-
-				ImGuiMCP::PushItemWidth(220.0F);
-				moved |= ImGuiMCP::SliderFloat(strings::TR("AIE_PreviewX", "Pane across"), &cx, 0.05F, 0.95F, "%.2f", 0);
-				moved |= ImGuiMCP::SliderFloat(strings::TR("AIE_PreviewY", "Pane down"), &cy, 0.05F, 0.95F, "%.2f", 0);
-				moved |= ImGuiMCP::SliderFloat(strings::TR("AIE_PreviewSize", "Pane size"), &size, 0.08F, 0.90F, "%.2f", 0);
-				ImGuiMCP::PopItemWidth();
-				if (moved) { preview::SetPane(cx, cy, size); }
-
-				ImGuiMCP::Toggle(strings::TR("AIE_PreviewFrame", "Mark the pane with corners and a caption"),
-								 &settings::preview::showFrame);
-			}
 
 			ImGuiMCP::Spacing();
 			if (ImGuiMCP::Button(strings::TR("AIE_All", "All")))
@@ -250,9 +208,6 @@ namespace UI
 			ImGuiMCP::SameLine();
 			ImGuiMCP::Text("%s", a_item.name.empty() ? a_item.editorID.c_str() : a_item.name.c_str());
 
-			// Selecting a row is what the 3D preview follows. Clicking the NAME rather than adding
-			// a button keeps the row the same width it was.
-			if (ImGuiMCP::IsItemClicked()) { g_selectedForm = a_item.form; }
 
 			// A quest item is called out wherever it appears, whether or not they are being hidden -
 			// handing yourself one can confuse the quest that owns it, and that is worth knowing
@@ -466,9 +421,6 @@ namespace UI
 		// The 3D preview follows whatever row was last clicked. Both calls belong at the end of the
 		// frame's drawing: Show only records the wish, Tick is what actually talks to the game's
 		// inventory renderer, and it has to happen on the frame it is drawn.
-		preview::Show(g_selectedForm);
-		preview::Tick();
-		preview::DrawFrame();
 	}
 
 	// The favourites page. Deliberately a SECOND page rather than a filter on the first: the whole
@@ -506,7 +458,6 @@ namespace UI
 		if (ImGuiMCP::Button(strings::TR("AIE_FavClear", "Clear all")))
 		{
 			favourites::Clear();
-			g_selectedForm = nullptr;
 			return;
 		}
 
@@ -544,8 +495,5 @@ namespace UI
             ImGuiMCP::TextDisabled("%s", g_status.c_str());
         }
 
-		preview::Show(g_selectedForm);
-		preview::Tick();
-		preview::DrawFrame();
 	}
 }

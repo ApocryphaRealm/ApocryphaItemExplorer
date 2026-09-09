@@ -1,65 +1,17 @@
 # Changelog
 
-## 1.0.3 - 2026-09-09 - untested
+## 1.0.3 - 2026-09-09 - working
 
 ### Added
 - Favourites. A star beside every item adds it to a second tab of its own, so a short list of things you keep coming back to does not have to be searched for again. The list is kept between sessions and stored as plugin name plus local form ID rather than a raw form ID, so it survives changes to your load order; anything whose plugin is gone is dropped with a line in the log rather than silently pointing at something else.
 - Sorting: name A-Z, name Z-A, value highest or lowest first, weight heaviest or lightest first. Ties fall back to the name so the order is stable. The Favourites tab follows the same setting, so switching tabs does not reshuffle everything.
 - Quest items are found and marked. Every loaded quest's aliases are walked at catalogue build time and an alias the game itself flags as a quest object marks the form it points at - 288 of them in a vanilla-plus-mods load order. They are tagged [quest] wherever they appear, because taking one can confuse the quest that owns it, and they can be hidden entirely with a switch.
-- A 3D preview of the selected item, asked of the game's own inventory renderer - the same one that shows an item when you highlight it in your inventory. Click a row to select it. One item at a time, because that is how that renderer works. **PROVEN NOT TO DRAW, 2026-09-09** - see Known limitation below; the plumbing is in and the picture is not.
-- The preview has a PANE you can put where you like, marked with corner brackets and the item's name above it. It has to be movable, and it defaults to the right of the screen, because the model is drawn by the game earlier in the frame than this page is drawn over it: wherever the two overlap the page wins and the model is behind it. Nothing is painted inside the brackets for the same reason - a backing plate there would hide what it frames. The brackets and the caption use the framework's screen-wide drawing (Apocrypha Menu Framework 1.5.8 and later), the same mechanism SkyHUD Settings Menu marks HUD positions with.
-- Pane controls on the page - across, down, size, and a switch for the brackets - and the pane, the mapping from it to the renderer's own units, and the model's placement are all kept in the INI, so where you put it survives a restart.
-
-### Known limitation - the 3D preview does not appear yet, and ships OFF
-`bShow3DPreview` defaults to 0. Everything around the model works and was measured on Test Build
-(SE 1.5.97) across sixteen runs on 2026-09-09; the picture is the one part that does not.
-
-What works: the mod loads the item's NIF itself through `BSModelDB::Demand`, attaches it to the
-game's own UI 3D scene (`UI3DSceneManager::AttachChild`), pushes the kInventory light scheme, and
-opens a registered menu of its own carrying the two flags CommonLibSSE records on `InventoryMenu`
-and not on the journal - `kInventoryItemMenu` and `kCustomRendering` - with a blank one-frame
-Scaleform movie of our own so the game treats it as a real menu. The game renders that menu:
-its `PreDisplay` fires. From there the scene's own render is called, at an address identified by
-disassembling the class's code block out of the running process.
-
-What does not: no model is composited. The only configuration in which it has ever appeared is
-with the VANILLA inventory open, which draws it correctly - so the model, the attach, the scheme
-and the placement are all right, and what remains is how the scene's render is actually driven.
-
-Ruled out by measurement, so nobody need retry them: it is not the model failing to build (it
-loads, with a path); not `Inventory3DManager`, whose `LoadInventoryItem` leaves `loadedModels`
-empty outside a real inventory menu, from any thread; not menu mode (the journal pauses the game
-with the same scene state and draws nothing); not `kRendersOffscreenTargets`, which only the HUD
-carries; and not the render thread versus the main thread, both of which were tried.
-
-THE MECHANISM, found in the game's own asset after those runs: extracting
-`interface/inventorymenu.swf` from `Skyrim - Interface.bsa` and decompiling it shows that the
-inventory's 3D is driven FROM THE MOVIE. `ItemMenu.as` calls
-`gfx.io.GameDelegate.call("UpdateItem3D", [true])` whenever the highlighted item changes, `[false]`
-when the list hides, plus `ZoomItemModel` and `Start`/`StopMouseRotation` for the interaction. The
-engine renders the item because the menu's ActionScript asks it to - not because a menu holds the
-right flags. That also explains why `LoadInventoryItem` never built anything for us: the model is
-built inside the `UpdateItem3D` handler, which only an item menu registers.
-
-That handler was then read directly. Its address comes from the LIVE InventoryMenu's `fxDelegate`,
-which lists every GameDelegate callback a menu has registered; `UpdateItem3D` sits at +0x88DFD0 on
-1.5.97. Disassembled, it is short and plain: on a false argument it calls
-`Inventory3DManager::UnloadInventoryItem` (id 50886); on a true one it takes the selected entry out
-of the menu's own list and tail-calls **`Inventory3DManager::LoadInventoryItem(InventoryEntryData*)`
-- id 50884, the ONE-ARGUMENT overload**. Every attempt here had used id 50885, the
-`(TESBoundObject*, ExtraDataList*)` overload, which the game never calls.
-
-Switching to the one-argument overload with an entry we build ourselves is what the code now does,
-because it is what the game does - and `loadedModels` is STILL empty. The remaining difference is
-visible in that same disassembly: the entry the game passes comes out of the menu's own item list
-(`[handler+0x48]`, then id 50086, then `[rax+8]`), so a synthetic `InventoryEntryData` is evidently
-not equivalent to one the item menu owns. That is where the next attempt should start.
 
 ### Fixed
-- The DevBench tool could not drive the 3D preview at all. Its `preview:` and `place:` ops had been written INSIDE the `find:` branch, so they only answered when the arguments also contained `find:` - which is how the preview reached a release without anyone having seen it draw. They are top-level ops now, joined by `pane:` and `previewstate`.
+- The DevBench tool's `find` op always includes quest items and always sorts A-Z whatever the page is set to, so a test's expectations never depend on a UI setting.
 
-### Changed
-- The DevBench tool's find op always includes quest items and always sorts A-Z whatever the page is set to, so a test's expectations never depend on a UI setting.
+### Not in this version
+- A 3D preview of the selected item was built and is NOT shipped here. The model loads, reaches the game's own UI 3D scene and the scene's render is called, and nothing is drawn - so rather than ship a switch that is on and does nothing, the feature is held back. The work is not lost: it is tagged `3d-preview-research` in the repository, along with what was established (the UI 3D scene render is Address Library id 51855 on 1.5.97; the engine only renders UI 3D while the game is paused; the item menus put their model in `Inventory3DManager`'s own `loadedModels` rather than attaching it to the scene root) and what was ruled out by measurement. It returns when it draws.
 
 ## 1.0.2 - 2026-09-08 - working
 
