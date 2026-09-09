@@ -54,7 +54,28 @@ namespace Catalog
 		// "Iron Sword of Cold" is its own weapon record - and they swamp a plugin's real content,
 		// so the page can switch them off.
 		bool          enchanted;
+		// Some quest names this exact form as a quest object. Established by ASKING the quest
+		// system, not guessed: every loaded quest's aliases are walked at build time, and an alias
+		// that is flagged IsQuestObject() and points at a base object marks that object here.
+		// Spawning one of these can confuse the quest that owns it, so the page says so and can
+		// hide them entirely.
+		bool          questItem;
 	};
+
+	// How a list is ordered. The catalogue's own order is the order forms happen to sit in the
+	// game's arrays, which is meaningless to a reader.
+	enum class Sort : std::uint32_t
+	{
+		kNameAsc = 0,   // A-Z
+		kNameDesc,      // Z-A
+		kValueDesc,     // most valuable first
+		kValueAsc,
+		kWeightDesc,    // heaviest first
+		kWeightAsc,
+		kCount
+	};
+
+	[[nodiscard]] const char* SortName(Sort a_sort);
 
 	struct Plugin
 	{
@@ -78,13 +99,24 @@ namespace Catalog
 	[[nodiscard]] std::vector<const Item*> ItemsOf(std::uint32_t a_pluginIndex,
 												   std::string_view a_search,
 												   bool a_kindFilter[static_cast<std::size_t>(Kind::kCount)],
-												   bool a_showEnchanted);
+												   bool a_showEnchanted,
+												   bool a_showQuestItems,
+												   Sort a_sort);
 
 	// Search every plugin at once - the thing the original gates behind a keypress inside a list.
 	[[nodiscard]] std::vector<const Item*> SearchAll(std::string_view a_search,
 													 bool a_kindFilter[static_cast<std::size_t>(Kind::kCount)],
 													 bool a_showEnchanted,
+													 bool a_showQuestItems,
+													 Sort a_sort,
 													 std::size_t a_limit);
+
+	// Orders a list that has already been gathered. Used by the Favourites page, which builds its
+	// list from saved form IDs rather than by filtering the catalogue.
+	void SortItems(std::vector<const Item*>& a_items, Sort a_sort);
+
+	// The one item matching a form, or nullptr. The Favourites page resolves saved IDs through it.
+	[[nodiscard]] const Item* Find(const RE::TESForm* a_form);
 
 	// Put a_count of a_form into the player's inventory, on the main thread, through the game's
 	// own path so the item arrives exactly as a container would hand it over.

@@ -103,7 +103,11 @@ namespace DevBenchTool
 
 				// "find:" hides enchanted variants like the page does; "findall:" includes them.
 				const bool withEnchanted = has("findall:");
-				const auto hits = Catalog::SearchAll(needle, all, withEnchanted, 60);
+				// The tool always includes quest items and always sorts A-Z, whatever the page is
+				// set to: a driving tool that answered differently depending on a UI setting would
+				// make a test's expectations depend on invisible state.
+				const auto hits = Catalog::SearchAll(needle, all, withEnchanted, true,
+													 Catalog::Sort::kNameAsc, 60);
 				std::string json = std::format(
 					"{{\"ok\":true,\"op\":\"find\",\"search\":\"{}\",\"returned\":{},\"items\":[",
 					EscapeJson(needle), hits.size());

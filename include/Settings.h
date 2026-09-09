@@ -16,6 +16,19 @@ namespace settings
 	{
 		inline std::uint32_t defaultCount = 1;   // uDefaultCount:General - how many an Add gives
 		inline bool includeSpells = true;        // bIncludeSpells:General - list spells alongside items
+
+		// Shows the selected item's own model, through the game's inventory 3D renderer. On by
+		// default because it is the fastest way to know what a form actually is when its name is
+		// something like "DummyMarker01".
+		inline bool show3DPreview = true;        // bShow3DPreview:General
+
+		// Items a quest calls its own. Shown by default but always marked, because handing yourself
+		// a quest item can confuse the quest that owns it - and someone who does not want to see
+		// them at all can switch them off here.
+		inline bool showQuestItems = true;       // bShowQuestItems:General
+
+		// Catalog::Sort - 0 A-Z, 1 Z-A, 2 value high, 3 value low, 4 weight high, 5 weight low.
+		inline std::uint32_t sortMode = 0;       // uSortMode:General
 	}
 
 	void Init(const std::string& a_iniFileName);

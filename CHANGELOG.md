@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.3 - 2026-09-09 - untested
+
+### Added
+- Favourites. A star beside every item adds it to a second tab of its own, so a short list of things you keep coming back to does not have to be searched for again. The list is kept between sessions and stored as plugin name plus local form ID rather than a raw form ID, so it survives changes to your load order; anything whose plugin is gone is dropped with a line in the log rather than silently pointing at something else.
+- Sorting: name A-Z, name Z-A, value highest or lowest first, weight heaviest or lightest first. Ties fall back to the name so the order is stable. The Favourites tab follows the same setting, so switching tabs does not reshuffle everything.
+- Quest items are found and marked. Every loaded quest's aliases are walked at catalogue build time and an alias the game itself flags as a quest object marks the form it points at - 288 of them in a vanilla-plus-mods load order. They are tagged [quest] wherever they appear, because taking one can confuse the quest that owns it, and they can be hidden entirely with a switch.
+- A 3D preview of the selected item, drawn by the game's own inventory renderer - the same one that shows an item when you highlight it in your inventory. Click a row to select it. One item at a time, because that is how that renderer works.
+
+### Changed
+- The DevBench tool's find op always includes quest items and always sorts A-Z whatever the page is set to, so a test's expectations never depend on a UI setting.
+
 ## 1.0.2 - 2026-09-08 - working
 
 ### Added

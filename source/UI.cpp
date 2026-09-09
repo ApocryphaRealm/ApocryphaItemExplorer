@@ -5,6 +5,8 @@
 #include "SKSEMenuFramework.h"
 
 #include "Catalog.h"
+#include "Favourites.h"
+#include "Preview.h"
 #include "Settings.h"
 
 #include "utils/Logger.h"
@@ -56,6 +58,10 @@ namespace UI
 		bool        g_kind[kKindCount];
 		bool        g_kindInit = false;
 		std::string g_status;
+
+		// What the 3D preview is following. A raw pointer into the catalogue, which lives as long
+		// as the catalogue does; cleared whenever the catalogue is rebuilt.
+		RE::TESForm* g_selectedForm = nullptr;
 
 		// A broad search across a big load order can match tens of thousands of forms. The page
 		// shows the first slice and says so, rather than trying to draw all of them.
@@ -116,6 +122,45 @@ namespace UI
 				if ((i % 4) != 3 && i + 1 < kKindCount) { ImGuiMCP::SameLine(); }
 			}
 			ImGuiMCP::Spacing();
+
+			// Sorting. The catalogue's own order is the order forms sit in the game's arrays, which
+			// means nothing to a reader, so this is the first thing most people will want.
+			{
+				int sort = static_cast<int>(settings::general::sortMode);
+				std::vector<std::string> labelStore;
+				std::vector<const char*> labels;
+				// Translated here rather than in Catalog, which has no business knowing about the
+				// page's language. Catalog::SortName stays the English identifier the DevBench tool
+				// and the log use.
+				static constexpr const char* kSortKeys[] = {
+					"AIE_Sort_NameAsc", "AIE_Sort_NameDesc", "AIE_Sort_ValueDesc",
+					"AIE_Sort_ValueAsc", "AIE_Sort_WeightDesc", "AIE_Sort_WeightAsc"
+				};
+				labelStore.reserve(static_cast<std::size_t>(Catalog::Sort::kCount));
+				for (std::size_t i = 0; i < static_cast<std::size_t>(Catalog::Sort::kCount); ++i)
+				{
+					labelStore.emplace_back(strings::TR(kSortKeys[i],
+										   Catalog::SortName(static_cast<Catalog::Sort>(i))));
+				}
+				for (const auto& l : labelStore) { labels.push_back(l.c_str()); }
+
+				if (ImGuiMCP::Combo(strings::TR("AIE_SortBy", "Sort by"), &sort, labels.data(),
+									static_cast<int>(labels.size())))
+				{
+					settings::general::sortMode = static_cast<std::uint32_t>(sort);
+				}
+			}
+
+			ImGuiMCP::Toggle(strings::TR("AIE_ShowQuestItems", "Show quest items"),
+							 &settings::general::showQuestItems);
+			ImGuiMCP::SameLine();
+			ImGuiMCP::TextDisabled("%s", strings::TR("AIE_QuestHint",
+								   "items a quest calls its own - always tagged [quest] when shown"));
+
+			ImGuiMCP::Toggle(strings::TR("AIE_Show3D", "Show the selected item in 3D"),
+							 &settings::general::show3DPreview);
+
+			ImGuiMCP::Spacing();
 			if (ImGuiMCP::Button(strings::TR("AIE_All", "All")))
 			{
 				for (bool& b : g_kind) { b = true; }
@@ -145,8 +190,35 @@ namespace UI
 						   (a_item.name.empty() ? a_item.editorID : a_item.name);
 			}
 
+			// The favourite toggle. A filled star means it is on the Favourites page; the label is
+			// the whole control, so there is nothing to learn.
+			ImGuiMCP::SameLine();
+			const bool fav = favourites::Contains(a_item.form);
+			if (ImGuiMCP::Button(fav ? strings::TR("AIE_FavOn", "[*]") : strings::TR("AIE_FavOff", "[ ]")))
+			{
+				favourites::Toggle(a_item.form, a_item.name.empty() ? a_item.editorID : a_item.name);
+			}
+			if (ImGuiMCP::IsItemHovered())
+			{
+				ImGuiMCP::SetTooltip("%s", fav ? strings::TR("AIE_FavRemoveTip", "Remove from favourites")
+											   : strings::TR("AIE_FavAddTip", "Add to favourites"));
+			}
+
 			ImGuiMCP::SameLine();
 			ImGuiMCP::Text("%s", a_item.name.empty() ? a_item.editorID.c_str() : a_item.name.c_str());
+
+			// Selecting a row is what the 3D preview follows. Clicking the NAME rather than adding
+			// a button keeps the row the same width it was.
+			if (ImGuiMCP::IsItemClicked()) { g_selectedForm = a_item.form; }
+
+			// A quest item is called out wherever it appears, whether or not they are being hidden -
+			// handing yourself one can confuse the quest that owns it, and that is worth knowing
+			// before you press Add rather than afterwards.
+			if (a_item.questItem)
+			{
+				ImGuiMCP::SameLine();
+				ImGuiMCP::TextDisabled("%s", strings::TR("AIE_QuestTag", "[quest]"));
+			}
 
 			ImGuiMCP::SameLine();
 			if (a_showPlugin)
@@ -183,6 +255,7 @@ namespace UI
 
 		SKSEMenuFramework::SetSection("Item Explorer");
 		SKSEMenuFramework::AddSectionItem("Browse", ExplorerPanel::Render);
+		SKSEMenuFramework::AddSectionItem("Favourites", FavouritesPanel::Render);
 		logger::info("Registered the explorer page with the menu framework");
 	}
 
@@ -247,7 +320,10 @@ namespace UI
 			ImGuiMCP::InputText("##search_all", g_itemSearch, sizeof(g_itemSearch));
 			ImGuiMCP::PopItemWidth();
 
-			const auto hits = Catalog::SearchAll(g_itemSearch, g_kind, g_showEnchanted, kSearchLimit);
+			const auto hits = Catalog::SearchAll(g_itemSearch, g_kind, g_showEnchanted,
+												 settings::general::showQuestItems,
+												 static_cast<Catalog::Sort>(settings::general::sortMode),
+												 kSearchLimit);
 			if (g_itemSearch[0] == '\0')
 			{
 				ImGuiMCP::TextDisabled("%s", strings::TR("AIE_TypeToSearch", "Type to search."));
@@ -327,7 +403,9 @@ namespace UI
 			else
 			{
 				const auto items = Catalog::ItemsOf(static_cast<std::uint32_t>(g_selectedPlugin),
-													g_itemSearch, g_kind, g_showEnchanted);
+													g_itemSearch, g_kind, g_showEnchanted,
+													settings::general::showQuestItems,
+													static_cast<Catalog::Sort>(settings::general::sortMode));
 				ImGuiMCP::TextDisabled("%s - %d %s", plugins[g_selectedPlugin].fileName.c_str(),
 									   static_cast<int>(items.size()), strings::TR("AIE_Shown", "shown"));
 
@@ -341,5 +419,88 @@ namespace UI
 			ImGuiMCP::Spacing();
 			ImGuiMCP::TextDisabled("%s", g_status.c_str());
 		}
+
+		// The 3D preview follows whatever row was last clicked. Both calls belong at the end of the
+		// frame's drawing: Show only records the wish, Tick is what actually talks to the game's
+		// inventory renderer, and it has to happen on the frame it is drawn.
+		preview::Show(g_selectedForm);
+		preview::Tick();
+	}
+
+	// The favourites page. Deliberately a SECOND page rather than a filter on the first: the whole
+	// point is a short list you keep coming back to, and hiding it behind the same search box the
+	// catalogue uses would defeat that.
+	void __stdcall FavouritesPanel::Render()
+	{
+		strings::Tick();
+
+		ImGuiMCP::Text("%s", strings::TR("AIE_FavTitle", "Favourites"));
+		ImGuiMCP::Separator();
+
+		const auto& all = favourites::All();
+
+		if (all.empty())
+		{
+			ImGuiMCP::TextWrapped("%s", strings::TR("AIE_FavEmpty",
+								  "Nothing here yet. Find something on the Browse page and press the "
+								  "star beside it. Favourites are kept between sessions, and they are "
+								  "stored per plugin, so they survive changes to your load order."));
+			return;
+		}
+
+		if (!Catalog::Built())
+		{
+			ImGuiMCP::TextWrapped("%s", strings::TR("AIE_FavNeedsCatalogue",
+								  "Read the load order on the Browse page first - these are stored as "
+								  "plugin names and need the catalogue to turn back into items."));
+			return;
+		}
+
+		ImGuiMCP::TextDisabled("%s: %d", strings::TR("AIE_FavCount", "Saved"), static_cast<int>(all.size()));
+
+		ImGuiMCP::SameLine();
+		if (ImGuiMCP::Button(strings::TR("AIE_FavClear", "Clear all")))
+		{
+			favourites::Clear();
+			g_selectedForm = nullptr;
+			return;
+		}
+
+		ImGuiMCP::Spacing();
+		ImGuiMCP::Separator();
+
+		// Built from the saved list, then ordered by the SAME sort the Browse page is using, so
+		// switching pages does not reshuffle everything under the reader.
+		std::vector<const Catalog::Item*> items;
+		items.reserve(all.size());
+		for (const auto& e : all)
+		{
+			if (const Catalog::Item* item = Catalog::Find(e.form)) { items.push_back(item); }
+		}
+		Catalog::SortItems(items, static_cast<Catalog::Sort>(settings::general::sortMode));
+
+		if (items.empty())
+		{
+			ImGuiMCP::TextWrapped("%s", strings::TR("AIE_FavNoneResolved",
+								  "None of the saved favourites are in the current load order."));
+			return;
+		}
+
+		if (ImGuiMCP::BeginChild("aie_favs", ImGuiMCP::ImVec2(0.0F, 460.0F), 1))
+		{
+			// Shown WITH the plugin name: a favourites list is the one place you are most likely to
+			// be looking at two similarly named things from different mods.
+			for (const auto* item : items) { DrawItemRow(*item, true); }
+		}
+		ImGuiMCP::EndChild();
+
+        if (!g_status.empty())
+        {
+            ImGuiMCP::Spacing();
+            ImGuiMCP::TextDisabled("%s", g_status.c_str());
+        }
+
+		preview::Show(g_selectedForm);
+		preview::Tick();
 	}
 }

@@ -10,4 +10,10 @@ namespace UI
 	{
 		void __stdcall Render();
 	}
+
+	// A second page under the same section, for the items marked with the star on the first.
+	namespace FavouritesPanel
+	{
+		void __stdcall Render();
+	}
 }

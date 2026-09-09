@@ -10,6 +10,7 @@
 // converting: it needs no UIExtensions, it runs no Papyrus, and it ships no ESP.
 #include "PCH.h"
 
+#include "Favourites.h"
 #include "Catalog.h"
 #include "DevBenchTool.h"
 #include "Settings.h"
@@ -30,6 +31,7 @@ namespace
 
 		case SKSE::MessagingInterface::kDataLoaded:
 			strings::Configure("ApocryphaItemExplorer");
+			favourites::Resolve();
 			UI::Register();
 			DevBenchTool::Init(true);
 			// The catalogue is NOT built here. Walking every form array costs real time on a large
@@ -51,6 +53,8 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 
 	settings::Init("ApocryphaItemExplorer.ini");
 	settings::ApplyLogLevel();
+
+	favourites::Load();
 
 	logger::info("ApocryphaRealm Item Explorer {} loading",
 				 SKSE::PluginDeclaration::GetSingleton()->GetVersion().string("."));

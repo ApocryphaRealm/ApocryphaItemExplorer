@@ -2,6 +2,8 @@
 
 #include "Catalog.h"
 
+#include <unordered_set>
+
 #include "utils/Logger.h"
 
 #include <algorithm>
@@ -145,6 +147,137 @@ namespace Catalog
 	const std::vector<Plugin>& Plugins() { return g_plugins; }
 	const std::vector<Item>&   Items()   { return g_items; }
 
+	const char* SortName(Sort a_sort)
+	{
+		switch (a_sort)
+		{
+		case Sort::kNameAsc:    return "Name A-Z";
+		case Sort::kNameDesc:   return "Name Z-A";
+		case Sort::kValueDesc:  return "Value, highest first";
+		case Sort::kValueAsc:   return "Value, lowest first";
+		case Sort::kWeightDesc: return "Weight, heaviest first";
+		case Sort::kWeightAsc:  return "Weight, lightest first";
+		default:                return "Name A-Z";
+		}
+	}
+
+	void SortItems(std::vector<const Item*>& a_items, Sort a_sort)
+	{
+		// Ties fall back to the name so the order is stable and reads sensibly - a value sort over
+		// three hundred items worth 0 gold is otherwise arbitrary noise.
+		const auto byName = [](const Item* a, const Item* b) {
+			const std::string an = Lower(a->name.empty() ? a->editorID : a->name);
+			const std::string bn = Lower(b->name.empty() ? b->editorID : b->name);
+			return an < bn;
+		};
+
+		switch (a_sort)
+		{
+		case Sort::kNameDesc:
+			std::sort(a_items.begin(), a_items.end(), [&](const Item* a, const Item* b) { return byName(b, a); });
+			break;
+		case Sort::kValueDesc:
+			std::sort(a_items.begin(), a_items.end(), [&](const Item* a, const Item* b) {
+				return a->value != b->value ? a->value > b->value : byName(a, b); });
+			break;
+		case Sort::kValueAsc:
+			std::sort(a_items.begin(), a_items.end(), [&](const Item* a, const Item* b) {
+				return a->value != b->value ? a->value < b->value : byName(a, b); });
+			break;
+		case Sort::kWeightDesc:
+			std::sort(a_items.begin(), a_items.end(), [&](const Item* a, const Item* b) {
+				return a->weight != b->weight ? a->weight > b->weight : byName(a, b); });
+			break;
+		case Sort::kWeightAsc:
+			std::sort(a_items.begin(), a_items.end(), [&](const Item* a, const Item* b) {
+				return a->weight != b->weight ? a->weight < b->weight : byName(a, b); });
+			break;
+		case Sort::kNameAsc:
+		default:
+			std::sort(a_items.begin(), a_items.end(), byName);
+			break;
+		}
+	}
+
+	const Item* Find(const RE::TESForm* a_form)
+	{
+		if (!a_form) { return nullptr; }
+		for (const Item& item : g_items)
+		{
+			if (item.form == a_form) { return &item; }
+		}
+		return nullptr;
+	}
+
+	namespace
+	{
+		// Which base objects a quest actually calls its own.
+		//
+		// ASKED, not inferred (rule 30): every loaded quest is walked, and every alias that the
+		// game itself flags IsQuestObject() contributes the form it points at - the base object of
+		// a "create reference to object" alias, or the base object of a forced reference. A base
+		// form carries no quest-item flag of its own, so this is the only honest way to answer the
+		// question for a catalogue of forms rather than of inventory entries.
+		std::size_t MarkQuestObjects()
+		{
+			auto* handler = RE::TESDataHandler::GetSingleton();
+			if (!handler) { return 0; }
+
+			std::unordered_set<RE::FormID> questForms;
+			std::size_t aliasesSeen = 0;
+
+			for (RE::TESQuest* quest : handler->GetFormArray<RE::TESQuest>())
+			{
+				if (!quest) { continue; }
+
+				for (RE::BGSBaseAlias* alias : quest->aliases)
+				{
+					if (!alias) { continue; }
+					++aliasesSeen;
+
+					if (!alias->IsQuestObject()) { continue; }
+
+					auto* refAlias = skyrim_cast<RE::BGSRefAlias*>(alias);
+					if (!refAlias) { continue; }
+
+					switch (refAlias->fillType.get())
+					{
+					case RE::BGSBaseAlias::FILL_TYPE::kCreated:
+						if (auto* object = refAlias->fillData.created.object)
+						{
+							questForms.insert(object->GetFormID());
+						}
+						break;
+
+					case RE::BGSBaseAlias::FILL_TYPE::kForced:
+						if (auto ref = refAlias->fillData.forced.forcedRef.get())
+						{
+							if (auto* base = ref->GetBaseObject())
+							{
+								questForms.insert(base->GetFormID());
+							}
+						}
+						break;
+
+					default:
+						break;
+					}
+				}
+			}
+
+			std::size_t marked = 0;
+			for (Item& item : g_items)
+			{
+				item.questItem = questForms.count(item.formID) != 0;
+				if (item.questItem) { ++marked; }
+			}
+
+			logger::info("catalog: {} quest object(s) across {} alias(es) - those items are marked "
+						 "and can be hidden from the page", marked, aliasesSeen);
+			return marked;
+		}
+	}
+
 	std::size_t Build()
 	{
 		g_plugins.clear();
@@ -170,6 +303,8 @@ namespace Catalog
 		Collect<RE::TESObjectMISC>(Kind::kMisc);
 		Collect<RE::TESObjectLIGH>(Kind::kLight);
 		Collect<RE::SpellItem>(Kind::kSpell);
+
+		MarkQuestObjects();
 
 		for (const Item& item : g_items)
 		{
@@ -208,7 +343,7 @@ namespace Catalog
 
 	std::vector<const Item*> ItemsOf(std::uint32_t a_pluginIndex, std::string_view a_search,
 									 bool a_kindFilter[static_cast<std::size_t>(Kind::kCount)],
-									 bool a_showEnchanted)
+									 bool a_showEnchanted, bool a_showQuestItems, Sort a_sort)
 	{
 		std::vector<const Item*> out;
 		const std::string needle = Lower(a_search);
@@ -217,6 +352,7 @@ namespace Catalog
 		{
 			if (item.pluginIndex != a_pluginIndex) { continue; }
 			if (!a_showEnchanted && item.enchanted) { continue; }
+			if (!a_showQuestItems && item.questItem) { continue; }
 			if (a_kindFilter && !a_kindFilter[static_cast<std::size_t>(item.kind)]) { continue; }
 			if (!needle.empty() &&
 				!Contains(Lower(item.name), needle) && !Contains(Lower(item.editorID), needle))
@@ -225,12 +361,15 @@ namespace Catalog
 			}
 			out.push_back(&item);
 		}
+
+		SortItems(out, a_sort);
 		return out;
 	}
 
 	std::vector<const Item*> SearchAll(std::string_view a_search,
 									   bool a_kindFilter[static_cast<std::size_t>(Kind::kCount)],
-									   bool a_showEnchanted, std::size_t a_limit)
+									   bool a_showEnchanted, bool a_showQuestItems, Sort a_sort,
+									   std::size_t a_limit)
 	{
 		std::vector<const Item*> out;
 		const std::string needle = Lower(a_search);
@@ -239,11 +378,17 @@ namespace Catalog
 		for (const Item& item : g_items)
 		{
 			if (!a_showEnchanted && item.enchanted) { continue; }
+			if (!a_showQuestItems && item.questItem) { continue; }
 			if (a_kindFilter && !a_kindFilter[static_cast<std::size_t>(item.kind)]) { continue; }
 			if (!Contains(Lower(item.name), needle) && !Contains(Lower(item.editorID), needle)) { continue; }
 			out.push_back(&item);
 			if (a_limit && out.size() >= a_limit) { break; }
 		}
+
+		// Sorted AFTER the cap, deliberately. Sorting the whole match set first would be the
+		// honest ordering but means ordering tens of thousands of forms on every keystroke; the
+		// page already tells the reader the list was cut short.
+		SortItems(out, a_sort);
 		return out;
 	}
 

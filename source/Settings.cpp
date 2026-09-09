@@ -2,6 +2,8 @@
 
 #include "Settings.h"
 
+#include "Catalog.h"
+
 #include "utils/INISettingCollection.h"
 #include "utils/Logger.h"
 #include "utils/Setting.h"
@@ -25,6 +27,9 @@ namespace settings
 			std::uint32_t logLevel;
 			std::uint32_t defaultCount;
 			bool          includeSpells;
+			bool          show3DPreview;
+			bool          showQuestItems;
+			std::uint32_t sortMode;
 		} defaults{};
 
 		std::string Lower(std::string a_s)
@@ -88,9 +93,17 @@ namespace settings
 			get("uloglevel:debug", debug::logLevel, ParseUInt);
 			get("udefaultcount:general", general::defaultCount, ParseUInt);
 			get("bincludespells:general", general::includeSpells, ParseBool);
+			get("bshow3dpreview:general", general::show3DPreview, ParseBool);
+			get("bshowquestitems:general", general::showQuestItems, ParseBool);
+			get("usortmode:general", general::sortMode, ParseUInt);
 			if (general::defaultCount == 0) { general::defaultCount = 1; }
-			logger::info("settings loaded from {}: defaultCount={} includeSpells={} logLevel={}",
-						 iniPath, general::defaultCount, general::includeSpells, debug::logLevel);
+			// Clamped rather than trusted: an out-of-range sort index read from a hand-edited INI
+			// would index past the end of the mode table.
+			if (general::sortMode >= static_cast<std::uint32_t>(Catalog::Sort::kCount)) { general::sortMode = 0; }
+			logger::info("settings loaded from {}: defaultCount={} includeSpells={} preview3D={} "
+						 "questItems={} sortMode={} logLevel={}",
+						 iniPath, general::defaultCount, general::includeSpells, general::show3DPreview,
+						 general::showQuestItems, general::sortMode, debug::logLevel);
 			return true;
 		}
 
@@ -120,13 +133,17 @@ namespace settings
 	{
 		iniPath = (std::filesystem::current_path() / "Data" / "SKSE" / "Plugins" / a_iniFileName).string();
 
-		defaults = { debug::logLevel, general::defaultCount, general::includeSpells };
+		defaults = { debug::logLevel, general::defaultCount, general::includeSpells,
+					 general::show3DPreview, general::showQuestItems, general::sortMode };
 
 		auto* collection = utils::INISettingCollection::GetSingleton();
 		collection->AddSettings(
 			utils::MakeSetting("uLogLevel:Debug", static_cast<unsigned int>(debug::logLevel)),
 			utils::MakeSetting("uDefaultCount:General", static_cast<unsigned int>(general::defaultCount)),
-			utils::MakeSetting("bIncludeSpells:General", general::includeSpells));
+			utils::MakeSetting("bIncludeSpells:General", general::includeSpells),
+			utils::MakeSetting("bShow3DPreview:General", general::show3DPreview),
+			utils::MakeSetting("bShowQuestItems:General", general::showQuestItems),
+			utils::MakeSetting("uSortMode:General", static_cast<unsigned int>(general::sortMode)));
 
 		LoadFileValues();
 	}
@@ -152,6 +169,9 @@ namespace settings
 		ok &= WriteKey(lines, "Debug", "uLogLevel", std::to_string(debug::logLevel));
 		ok &= WriteKey(lines, "General", "uDefaultCount", std::to_string(general::defaultCount));
 		ok &= WriteKey(lines, "General", "bIncludeSpells", general::includeSpells ? "1" : "0");
+		ok &= WriteKey(lines, "General", "bShow3DPreview", general::show3DPreview ? "1" : "0");
+		ok &= WriteKey(lines, "General", "bShowQuestItems", general::showQuestItems ? "1" : "0");
+		ok &= WriteKey(lines, "General", "uSortMode", std::to_string(general::sortMode));
 
 		std::ofstream out(iniPath, std::ios::trunc);
 		if (!out) { logger::error("Save: could not open {} for writing", iniPath); return false; }
@@ -165,6 +185,9 @@ namespace settings
 		debug::logLevel = defaults.logLevel;
 		general::defaultCount = defaults.defaultCount;
 		general::includeSpells = defaults.includeSpells;
+		general::show3DPreview = defaults.show3DPreview;
+		general::showQuestItems = defaults.showQuestItems;
+		general::sortMode = defaults.sortMode;
 		ApplyLogLevel();
 	}
 
