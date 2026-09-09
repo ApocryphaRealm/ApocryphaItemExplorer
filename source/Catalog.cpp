@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <type_traits>
 #include <functional>
 #include <unordered_map>
 
@@ -100,6 +101,17 @@ namespace Catalog
 				item.weight = form->GetWeight();
 				item.value = form->GetGoldValue();
 
+				// Only weapons and armour carry an enchantment slot, so this is decided at compile
+				// time rather than by a runtime cast that would be wrong for every other kind.
+				if constexpr (std::is_base_of_v<RE::TESEnchantableForm, T>)
+				{
+					item.enchanted = (form->formEnchanting != nullptr);
+				}
+				else
+				{
+					item.enchanted = false;
+				}
+
 				g_items.push_back(std::move(item));
 				++added;
 			}
@@ -186,13 +198,17 @@ namespace Catalog
 		for (const Plugin& p : g_plugins) { if (p.light) { ++light; } }
 
 		g_built = true;
-		logger::info("catalog: {} item(s) from {} plugin(s) that provide any ({} light)",
-					 g_items.size(), g_plugins.size(), light);
+		std::size_t ench = 0;
+		for (const Item& i : g_items) { if (i.enchanted) { ++ench; } }
+
+		logger::info("catalog: {} item(s) from {} plugin(s) that provide any ({} light, {} enchanted variants)",
+					 g_items.size(), g_plugins.size(), light, ench);
 		return g_items.size();
 	}
 
 	std::vector<const Item*> ItemsOf(std::uint32_t a_pluginIndex, std::string_view a_search,
-									 bool a_kindFilter[static_cast<std::size_t>(Kind::kCount)])
+									 bool a_kindFilter[static_cast<std::size_t>(Kind::kCount)],
+									 bool a_showEnchanted)
 	{
 		std::vector<const Item*> out;
 		const std::string needle = Lower(a_search);
@@ -200,6 +216,7 @@ namespace Catalog
 		for (const Item& item : g_items)
 		{
 			if (item.pluginIndex != a_pluginIndex) { continue; }
+			if (!a_showEnchanted && item.enchanted) { continue; }
 			if (a_kindFilter && !a_kindFilter[static_cast<std::size_t>(item.kind)]) { continue; }
 			if (!needle.empty() &&
 				!Contains(Lower(item.name), needle) && !Contains(Lower(item.editorID), needle))
@@ -213,7 +230,7 @@ namespace Catalog
 
 	std::vector<const Item*> SearchAll(std::string_view a_search,
 									   bool a_kindFilter[static_cast<std::size_t>(Kind::kCount)],
-									   std::size_t a_limit)
+									   bool a_showEnchanted, std::size_t a_limit)
 	{
 		std::vector<const Item*> out;
 		const std::string needle = Lower(a_search);
@@ -221,6 +238,7 @@ namespace Catalog
 
 		for (const Item& item : g_items)
 		{
+			if (!a_showEnchanted && item.enchanted) { continue; }
 			if (a_kindFilter && !a_kindFilter[static_cast<std::size_t>(item.kind)]) { continue; }
 			if (!Contains(Lower(item.name), needle) && !Contains(Lower(item.editorID), needle)) { continue; }
 			out.push_back(&item);

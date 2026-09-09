@@ -50,6 +50,10 @@ namespace Catalog
 		std::uint32_t pluginIndex; // index into Plugins()
 		float         weight;
 		std::int32_t  value;
+		// An enchanted variant of a piece of equipment. Skyrim ships hundreds of these - every
+		// "Iron Sword of Cold" is its own weapon record - and they swamp a plugin's real content,
+		// so the page can switch them off.
+		bool          enchanted;
 	};
 
 	struct Plugin
@@ -73,11 +77,13 @@ namespace Catalog
 	// a_search matches the name or the editor ID.
 	[[nodiscard]] std::vector<const Item*> ItemsOf(std::uint32_t a_pluginIndex,
 												   std::string_view a_search,
-												   bool a_kindFilter[static_cast<std::size_t>(Kind::kCount)]);
+												   bool a_kindFilter[static_cast<std::size_t>(Kind::kCount)],
+												   bool a_showEnchanted);
 
 	// Search every plugin at once - the thing the original gates behind a keypress inside a list.
 	[[nodiscard]] std::vector<const Item*> SearchAll(std::string_view a_search,
 													 bool a_kindFilter[static_cast<std::size_t>(Kind::kCount)],
+													 bool a_showEnchanted,
 													 std::size_t a_limit);
 
 	// Put a_count of a_form into the player's inventory, on the main thread, through the game's

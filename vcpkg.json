@@ -1,6 +1,6 @@
-{
+﻿{
     "name": "apocryphaitemexplorer",
-    "version-string": "1.0.0",
+    "version-string": "1.0.1",
     "description": "ApocryphaRealm Item Explorer - browse every loaded plugin and the items it adds, and take any of them, from an in-game page. No UIExtensions, no Papyrus, no plugin file.",
     "homepage": "https://github.com/ApocryphaRealm/ApocryphaItemExplorer",
     "license": "MIT",

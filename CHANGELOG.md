@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.1 - 2026-09-08 - untested
+
+### Added
+- Added a switch for enchanted variants, off by default. Skyrim ships hundreds of enchanted versions of every weapon and armour piece, and they bury what a plugin actually adds; with the switch off you see the base equipment only. The DevBench search hides them too, and op=findall includes them.
+
+### Fixed
+- The page drew its boolean settings as tick-boxes. They are sliding on/off switches now, as every settings page in this project uses.
+
 ## 1.0.0 - 2026-09-08 - working
 
 ### Added

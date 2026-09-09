@@ -94,14 +94,16 @@ namespace DevBenchTool
 
 			// op=find:<text> - search every plugin at once, capped so a broad term cannot flood
 			// the reply.
-			if (has("find:"))
+			if (has("find:") || has("findall:"))
 			{
 				EnsureBuilt();
-				const std::string needle = After(args, "find:");
+				const std::string needle = After(args, has("findall:") ? "findall:" : "find:");
 				bool all[static_cast<std::size_t>(Catalog::Kind::kCount)];
 				for (bool& b : all) { b = true; }
 
-				const auto hits = Catalog::SearchAll(needle, all, 60);
+				// "find:" hides enchanted variants like the page does; "findall:" includes them.
+				const bool withEnchanted = has("findall:");
+				const auto hits = Catalog::SearchAll(needle, all, withEnchanted, 60);
 				std::string json = std::format(
 					"{{\"ok\":true,\"op\":\"find\",\"search\":\"{}\",\"returned\":{},\"items\":[",
 					EscapeJson(needle), hits.size());
@@ -199,7 +201,7 @@ namespace DevBenchTool
 			"\"description\":\"ApocryphaRealm Item Explorer - every loaded plugin and the items it adds, "
 			"read live from TESDataHandler. op=plugins lists each loaded file with its item count (the "
 			"enumeration proof - check it against the load order on disk). op=build forces a rebuild. "
-			"op=find:<text> searches every plugin at once by item name or editor ID, capped at 60 results. "
+			"op=find:<text> searches every plugin at once by item name or editor ID, capped at 60 results, hiding enchanted variants of equipment the way the page does; op=findall:<text> is the same but includes them. "
 			"op=give:<hex formID>[:<count>] puts an item in the player's inventory through the game's own "
 			"path, queued onto the main thread; a spell is taught instead of added. op=reload re-reads the "
 			"INI. No argument reports settings and whether the catalogue has been built yet.\","

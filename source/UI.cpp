@@ -27,6 +27,9 @@ namespace UI
 		int         g_selectedPlugin = -1;
 		int         g_addCount = 1;
 		bool        g_searchEverywhere = false;
+		// Skyrim ships hundreds of enchanted variants of every base weapon and armour piece,
+		// and they bury what a plugin actually adds. Off by default for that reason.
+		bool        g_showEnchanted = false;
 		bool        g_kind[kKindCount];
 		bool        g_kindInit = false;
 		std::string g_status;
@@ -55,7 +58,11 @@ namespace UI
 			"igButton", "igCheckbox", "igInputInt", "igInputText",
 			"igSelectable_Bool", "igBeginChild_Str", "igEndChild",
 			"igSeparator", "igSeparatorText", "igSpacing", "igSameLine",
-			"igPushItemWidth", "igPopItemWidth", "igPushID_Str", "igPopID"
+			"igPushItemWidth", "igPopItemWidth", "igPushID_Str", "igPopID",
+			// the hand-drawn Toggle (rule 32 - a boolean is a switch, never a tick-box)
+			"igGetCursorScreenPos", "igGetWindowDrawList", "igGetFrameHeight",
+			"igInvisibleButton", "igIsItemHovered",
+			"ImDrawList_AddRectFilled", "ImDrawList_AddCircleFilled"
 		};
 
 		bool HasRequiredExports()
@@ -82,7 +89,7 @@ namespace UI
 				const auto kind = static_cast<Catalog::Kind>(i);
 				if (kind == Catalog::Kind::kSpell && !settings::general::includeSpells) { continue; }
 
-				ImGuiMCP::Checkbox(Catalog::KindName(kind), &g_kind[i]);
+				ImGuiMCP::Toggle(Catalog::KindName(kind), &g_kind[i]);
 				if ((i % 4) != 3 && i + 1 < kKindCount) { ImGuiMCP::SameLine(); }
 			}
 			ImGuiMCP::Spacing();
@@ -199,7 +206,11 @@ namespace UI
 		ImGuiMCP::PopItemWidth();
 		if (g_addCount < 1) { g_addCount = 1; }
 		ImGuiMCP::SameLine();
-		ImGuiMCP::Checkbox(strings::TR("AIE_SearchEverywhere", "Search every plugin"), &g_searchEverywhere);
+		ImGuiMCP::Toggle(strings::TR("AIE_SearchEverywhere", "Search every plugin"), &g_searchEverywhere);
+		ImGuiMCP::Toggle(strings::TR("AIE_ShowEnchanted", "Show enchanted variants"), &g_showEnchanted);
+		ImGuiMCP::SameLine();
+		ImGuiMCP::TextDisabled("%s", strings::TR("AIE_EnchantedHint",
+							   "off hides every \"of Cold\" style variant, leaving the base equipment"));
 
 		DrawKindFilters();
 		ImGuiMCP::Spacing();
@@ -213,7 +224,7 @@ namespace UI
 			ImGuiMCP::InputText("##search_all", g_itemSearch, sizeof(g_itemSearch));
 			ImGuiMCP::PopItemWidth();
 
-			const auto hits = Catalog::SearchAll(g_itemSearch, g_kind, kSearchLimit);
+			const auto hits = Catalog::SearchAll(g_itemSearch, g_kind, g_showEnchanted, kSearchLimit);
 			if (g_itemSearch[0] == '\0')
 			{
 				ImGuiMCP::TextDisabled("%s", strings::TR("AIE_TypeToSearch", "Type to search."));
@@ -293,7 +304,7 @@ namespace UI
 			else
 			{
 				const auto items = Catalog::ItemsOf(static_cast<std::uint32_t>(g_selectedPlugin),
-													g_itemSearch, g_kind);
+													g_itemSearch, g_kind, g_showEnchanted);
 				ImGuiMCP::TextDisabled("%s - %d %s", plugins[g_selectedPlugin].fileName.c_str(),
 									   static_cast<int>(items.size()), strings::TR("AIE_Shown", "shown"));
 
