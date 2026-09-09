@@ -22,6 +22,29 @@ namespace UI
 	{
 		constexpr std::size_t kKindCount = static_cast<std::size_t>(Catalog::Kind::kCount);
 
+		// The kind names the PAGE shows, in the player's language. Catalog::KindName stays English
+		// deliberately: that one is what the log lines and the aie.catalog DevBench tool print, and
+		// a tool's identifiers must not change with the language the player happens to be reading.
+		const char* KindLabel(Catalog::Kind a_kind)
+		{
+			switch (a_kind)
+			{
+			case Catalog::Kind::kWeapon:     return strings::TR("AIE_KindWeapon",     "Weapon");
+			case Catalog::Kind::kArmor:      return strings::TR("AIE_KindArmor",      "Armor");
+			case Catalog::Kind::kAmmo:       return strings::TR("AIE_KindAmmo",       "Ammo");
+			case Catalog::Kind::kBook:       return strings::TR("AIE_KindBook",       "Book");
+			case Catalog::Kind::kIngredient: return strings::TR("AIE_KindIngredient", "Ingredient");
+			case Catalog::Kind::kPotion:     return strings::TR("AIE_KindPotion",     "Potion");
+			case Catalog::Kind::kScroll:     return strings::TR("AIE_KindScroll",     "Scroll");
+			case Catalog::Kind::kSoulGem:    return strings::TR("AIE_KindSoulGem",    "Soul gem");
+			case Catalog::Kind::kKey:        return strings::TR("AIE_KindKey",        "Key");
+			case Catalog::Kind::kMisc:       return strings::TR("AIE_KindMisc",       "Misc");
+			case Catalog::Kind::kLight:      return strings::TR("AIE_KindLight",      "Light");
+			case Catalog::Kind::kSpell:      return strings::TR("AIE_KindSpell",      "Spell");
+			default:                         return Catalog::KindName(a_kind);
+			}
+		}
+
 		char        g_pluginFilter[128] = {};
 		char        g_itemSearch[128] = {};
 		int         g_selectedPlugin = -1;
@@ -89,7 +112,7 @@ namespace UI
 				const auto kind = static_cast<Catalog::Kind>(i);
 				if (kind == Catalog::Kind::kSpell && !settings::general::includeSpells) { continue; }
 
-				ImGuiMCP::Toggle(Catalog::KindName(kind), &g_kind[i]);
+				ImGuiMCP::Toggle(KindLabel(kind), &g_kind[i]);
 				if ((i % 4) != 3 && i + 1 < kKindCount) { ImGuiMCP::SameLine(); }
 			}
 			ImGuiMCP::Spacing();
@@ -129,14 +152,14 @@ namespace UI
 			if (a_showPlugin)
 			{
 				const auto& plugins = Catalog::Plugins();
-				ImGuiMCP::TextDisabled("- %s, %s, 0x%08X", Catalog::KindName(a_item.kind),
+				ImGuiMCP::TextDisabled("- %s, %s, 0x%08X", KindLabel(a_item.kind),
 									   a_item.pluginIndex < plugins.size()
 										   ? plugins[a_item.pluginIndex].fileName.c_str() : "?",
 									   a_item.formID);
 			}
 			else
 			{
-				ImGuiMCP::TextDisabled("- %s, 0x%08X", Catalog::KindName(a_item.kind), a_item.formID);
+				ImGuiMCP::TextDisabled("- %s, 0x%08X", KindLabel(a_item.kind), a_item.formID);
 			}
 
 			ImGuiMCP::PopID();
