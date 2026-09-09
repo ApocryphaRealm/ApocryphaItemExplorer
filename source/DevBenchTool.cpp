@@ -219,10 +219,13 @@ namespace DevBenchTool
 				const auto sc = preview::GetSceneState();
 				a_write(a_sink, std::format(
 					R"({{"ok":{},"op":"uiscene","cameraPresent":{},"occupiedSlots":{},"ourSlot":{},)"
-					R"("lightScheme":{},"currentMenu":{},"menuIDCount":{},"lightCount":{}}})",
+					R"("lightScheme":{},"currentMenu":{},"menuIDCount":{},"lightCount":{},)"
+					R"("loadedModels":{},"meshCount":{},"menuIDs":{}}})",
 					sc.available ? "true" : "false", sc.cameraPresent ? "true" : "false",
 					sc.occupiedSlots, sc.ourSlot, sc.lightScheme, sc.currentMenu,
-					sc.menuIDCount, sc.lightCount).c_str());
+					sc.menuIDCount, sc.lightCount,
+					sc.loadedModels, sc.meshCount,
+					sc.menuIDs.empty() ? std::string("[]") : sc.menuIDs).c_str());
 				return;
 			}
 			if (has("openinventory"))

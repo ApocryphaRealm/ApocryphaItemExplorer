@@ -129,6 +129,21 @@ namespace preview
 		std::uint32_t currentMenu = 0;
 		std::uint32_t menuIDCount = 0;
 		std::uint32_t lightCount = 0;
+
+		// THE ENGINE'S OWN ANSWERS, added 1.0.4. Everything above this line is either the scene's
+		// state or a counter of ours, and the mod's counters are what made "showing=true loads=1"
+		// read as evidence that a model existed when loadedModels was empty. These three ask the
+		// engine directly (rule 30):
+		//   loadedModels - how many models Inventory3DManager is actually holding. Its Render()
+		//                  draws these; if it is 0 there is nothing for that call to paint.
+		//   meshCount    - the manager's own count of entries carrying a valid node.
+		//   menuIDs      - which menus the UI render manager renders the 3D scene FOR. If our
+		//                  menu is not in this list, the scene is never rendered on its behalf
+		//                  however the menu is flagged. Read it against the vanilla inventory
+		//                  (op=openinventory) and the difference is the answer.
+		std::uint32_t loadedModels = 0;
+		std::uint32_t meshCount = 0;
+		std::string   menuIDs;
 	};
 
 	[[nodiscard]] SceneState GetSceneState();

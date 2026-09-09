@@ -581,6 +581,28 @@ namespace preview
 		auto* asRender = reinterpret_cast<RE::UIRenderManager*>(scene);
 		st.currentMenu = asRender->currentMenu;
 		st.menuIDCount = static_cast<std::uint32_t>(asRender->menuIDs.size());
+
+		// WHICH menus, not just how many. The count alone cannot say whether ours is among them,
+		// and that is the question: the scene is rendered on behalf of the menus in this list.
+		st.menuIDs = "[";
+		for (std::uint32_t i = 0; i < asRender->menuIDs.size(); ++i)
+		{
+			if (i) { st.menuIDs += ","; }
+			st.menuIDs += std::to_string(asRender->menuIDs[i]);
+		}
+		st.menuIDs += "]";
+
+		// What the 3D manager is actually holding. Its Render() paints loadedModels, so a zero
+		// here means that call has nothing to draw no matter where it is called from.
+		if (auto* mgr = RE::Inventory3DManager::GetSingleton())
+		{
+			st.loadedModels = static_cast<std::uint32_t>(mgr->GetRuntimeData().loadedModels.size());
+			st.meshCount = 0;
+			for (const auto& m : mgr->GetRuntimeData().loadedModels)
+			{
+				if (m.spModel) { ++st.meshCount; }
+			}
+		}
 		return st;
 	}
 
