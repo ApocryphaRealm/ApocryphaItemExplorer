@@ -32,9 +32,17 @@ empty outside a real inventory menu, from any thread; not menu mode (the journal
 with the same scene state and draws nothing); not `kRendersOffscreenTargets`, which only the HUD
 carries; and not the render thread versus the main thread, both of which were tried.
 
-The next measurement, and it settles it in one run: hook the address being called and watch the
-game invoke it while the vanilla inventory is open, which confirms both the identification and the
-arguments it should be given.
+THE MECHANISM, found in the game's own asset after those runs: extracting
+`interface/inventorymenu.swf` from `Skyrim - Interface.bsa` and decompiling it shows that the
+inventory's 3D is driven FROM THE MOVIE. `ItemMenu.as` calls
+`gfx.io.GameDelegate.call("UpdateItem3D", [true])` whenever the highlighted item changes, `[false]`
+when the list hides, plus `ZoomItemModel` and `Start`/`StopMouseRotation` for the interaction. The
+engine renders the item because the menu's ActionScript asks it to - not because a menu holds the
+right flags. That also explains why `LoadInventoryItem` never built anything for us: the model is
+built inside the `UpdateItem3D` handler, which only an item menu registers.
+
+So the next step is not another flag or another address: it is to drive that same path - a movie of
+ours that makes the call, or our own C++ doing what that handler does.
 
 ### Fixed
 - The DevBench tool could not drive the 3D preview at all. Its `preview:` and `place:` ops had been written INSIDE the `find:` branch, so they only answered when the arguments also contained `find:` - which is how the preview reached a release without anyone having seen it draw. They are top-level ops now, joined by `pane:` and `previewstate`.
