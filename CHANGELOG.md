@@ -10,16 +10,31 @@
 - The preview has a PANE you can put where you like, marked with corner brackets and the item's name above it. It has to be movable, and it defaults to the right of the screen, because the model is drawn by the game earlier in the frame than this page is drawn over it: wherever the two overlap the page wins and the model is behind it. Nothing is painted inside the brackets for the same reason - a backing plate there would hide what it frames. The brackets and the caption use the framework's screen-wide drawing (Apocrypha Menu Framework 1.5.8 and later), the same mechanism SkyHUD Settings Menu marks HUD positions with.
 - Pane controls on the page - across, down, size, and a switch for the brackets - and the pane, the mapping from it to the renderer's own units, and the model's placement are all kept in the INI, so where you put it survives a restart.
 
-### Known limitation - the 3D preview does not appear yet
-Measured on Test Build (SE 1.5.97) 2026-09-09 03:52, one launch, six captures. Every part around
-the model works: `Inventory3DManager` is reached, `Begin3D` and `LoadInventoryItem` succeed with no
-warning, the tool reports `showing=true loads=1`, the placement is applied every frame, and the
-pane's corner brackets and the item's name draw correctly over the menu window. **No model is
-composited into the frame at any placement** - centre, offset on either axis, or at double depth.
-`Inventory3DManager::Render()` is being called from inside the menu framework's DXGI Present hook,
-which is after the game's own render pass has run, so the call has nothing to draw into. Getting a
-picture needs the mod to own the render - its own target and camera, handed to the page as a
-texture - not a better placement. Until then this is plumbing, not a feature.
+### Known limitation - the 3D preview does not appear yet, and ships OFF
+`bShow3DPreview` defaults to 0. Everything around the model works and was measured on Test Build
+(SE 1.5.97) across sixteen runs on 2026-09-09; the picture is the one part that does not.
+
+What works: the mod loads the item's NIF itself through `BSModelDB::Demand`, attaches it to the
+game's own UI 3D scene (`UI3DSceneManager::AttachChild`), pushes the kInventory light scheme, and
+opens a registered menu of its own carrying the two flags CommonLibSSE records on `InventoryMenu`
+and not on the journal - `kInventoryItemMenu` and `kCustomRendering` - with a blank one-frame
+Scaleform movie of our own so the game treats it as a real menu. The game renders that menu:
+its `PreDisplay` fires. From there the scene's own render is called, at an address identified by
+disassembling the class's code block out of the running process.
+
+What does not: no model is composited. The only configuration in which it has ever appeared is
+with the VANILLA inventory open, which draws it correctly - so the model, the attach, the scheme
+and the placement are all right, and what remains is how the scene's render is actually driven.
+
+Ruled out by measurement, so nobody need retry them: it is not the model failing to build (it
+loads, with a path); not `Inventory3DManager`, whose `LoadInventoryItem` leaves `loadedModels`
+empty outside a real inventory menu, from any thread; not menu mode (the journal pauses the game
+with the same scene state and draws nothing); not `kRendersOffscreenTargets`, which only the HUD
+carries; and not the render thread versus the main thread, both of which were tried.
+
+The next measurement, and it settles it in one run: hook the address being called and watch the
+game invoke it while the vanilla inventory is open, which confirms both the identification and the
+arguments it should be given.
 
 ### Fixed
 - The DevBench tool could not drive the 3D preview at all. Its `preview:` and `place:` ops had been written INSIDE the `find:` branch, so they only answered when the arguments also contained `find:` - which is how the preview reached a release without anyone having seen it draw. They are top-level ops now, joined by `pane:` and `previewstate`.

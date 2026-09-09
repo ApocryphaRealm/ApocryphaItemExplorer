@@ -17,10 +17,11 @@ namespace settings
 		inline std::uint32_t defaultCount = 1;   // uDefaultCount:General - how many an Add gives
 		inline bool includeSpells = true;        // bIncludeSpells:General - list spells alongside items
 
-		// Shows the selected item's own model, through the game's inventory 3D renderer. On by
-		// default because it is the fastest way to know what a form actually is when its name is
-		// something like "DummyMarker01".
-		inline bool show3DPreview = true;        // bShow3DPreview:General
+		// Shows the selected item's own model, through the game's own UI 3D scene. OFF by default,
+		// and deliberately: as of 1.0.3 the model loads, reaches the scene and the scene's render
+		// is called, and nothing is painted (see the changelog). A switch that is on and does
+		// nothing reads as a broken mod, so it ships off until it draws - one line to turn back on.
+		inline bool show3DPreview = false;       // bShow3DPreview:General
 
 		// Items a quest calls its own. Shown by default but always marked, because handing yourself
 		// a quest item can confuse the quest that owns it - and someone who does not want to see
