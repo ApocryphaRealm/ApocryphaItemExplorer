@@ -4,6 +4,7 @@
 
 #include "SKSEMenuFramework.h"
 
+#include "PreviewMenu.h"
 #include "Settings.h"
 
 #include "utils/Logger.h"
@@ -124,6 +125,7 @@ namespace preview
 			}
 			g_model.reset();
 			g_modelPath.clear();
+			SetPreviewMenuOpen(false);
 
 			if (!a_mgr) { return; }
 
@@ -254,6 +256,21 @@ namespace preview
 					logger::info("preview: pushed the kInventory light scheme onto the UI 3D scene");
 				}
 
+				// The menu that makes the game render the scene at all. Opened only once there is
+				// something to show, so nothing of ours is on the UI stack while the page is idle.
+				SetPreviewMenuOpen(true);
+
+				// AND ask the 3D manager for the same item. Its Render() - which our menu now calls
+				// from PreDisplay, inside the game's render pass - draws the models IT holds, not
+				// whatever is parented into the scene, so it needs its own copy. This is the call
+				// that used to leave loadedModels empty; the difference now is that a menu marked
+				// kInventoryItemMenu is open, which is the family whose model-load task the game
+				// actually pumps. previewstate reports managerModels so this is measured, not hoped.
+				if (auto* bound = wanted->As<RE::TESBoundObject>())
+				{
+					mgr->LoadInventoryItem(bound, nullptr);
+				}
+
 				g_model = node;
 				g_modelPath = path;
 				g_loaded = wanted;
@@ -336,10 +353,12 @@ namespace preview
 			}
 			g_appliedX = x; g_appliedY = y; g_appliedZ = z; g_appliedScale = scale;
 
-			// Inventory3DManager::Render() used to be called here, on the belief that it was what
-			// put the item on screen. It is not, from this context: measured 2026-09-09, it draws
-			// nothing when called after the game's own render pass. What puts the model on screen
-			// is its membership of the UI 3D scene above, which the game renders inside that pass.
+			// Inventory3DManager::Render(), on the MAIN THREAD. The first version called this from
+			// the menu framework's Present hook and it drew nothing, which was written up as "this
+			// call is the wrong mechanism". That verdict was drawn from the wrong thread: the
+			// vanilla inventory calls it during its own menu render, on the main thread, and this
+			// whole function now runs there too. Same call, the place the game makes it.
+			if (mgr) { mgr->Render(); }
 		}
 	}
 
@@ -544,6 +563,11 @@ namespace preview
 		s.sceneAvailable = RE::UI3DSceneManager::GetSingleton() != nullptr;
 		s.attached = g_attached != nullptr;
 		s.attaches = g_attaches;
+		s.menuOpen = PreviewMenuOpen();
+		if (auto* mgr = RE::Inventory3DManager::GetSingleton())
+		{
+			s.managerModels = static_cast<std::uint32_t>(mgr->GetRuntimeData().loadedModels.size());
+		}
 		s.modelPath = g_modelPath;
 		s.lastError = g_lastError;
 		s.frameDrawn = g_frameDrawn;

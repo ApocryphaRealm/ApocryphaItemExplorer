@@ -88,6 +88,8 @@ namespace preview
 
 		// What the mod loaded, and why it did not - so a run says which of the two halves failed
 		// without a second launch to find out.
+		bool          menuOpen = false;
+		std::uint32_t managerModels = 0;   // Inventory3DManager::loadedModels.size()
 		std::string   modelPath;
 		std::string   lastError;
 	};
