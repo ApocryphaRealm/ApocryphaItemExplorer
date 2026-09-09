@@ -68,7 +68,18 @@ namespace preview
 		//    open is a real cost to the player, and it changed nothing when tried.
 		menuFlags.set(RE::UI_MENU_FLAGS::kCustomRendering,
 					  RE::UI_MENU_FLAGS::kInventoryItemMenu,
-					  RE::UI_MENU_FLAGS::kRequiresUpdate);
+					  RE::UI_MENU_FLAGS::kRequiresUpdate,
+					  // REQUIRED, not optional: the engine only renders the UI 3D scene while the
+					  // game is paused. Established from Modex's own settings text - "Requires
+					  // Pause Game while Open - the engine only renders UI 3D when [paused]" - and
+					  // consistent with every menu whose 3D draws (inventory, crafting, magic,
+					  // lockpicking, stats, mist) carrying kPausesGame while the journal, which
+					  // pauses but shows no 3D, does not render one either.
+					  //
+					  // It was tried once before and dismissed, but that build still set
+					  // kRendersOffscreenTargets and reset the camera to the origin every frame,
+					  // so it failed for reasons of its own.
+					  RE::UI_MENU_FLAGS::kPausesGame);
 
 		// Still NOT kUsesCursor - stealing the cursor from the framework's own menu would be
 		// visible to the player in a way this menu never should be.

@@ -99,6 +99,12 @@ namespace preview
 		// empty.
 		std::uint32_t managerScheme = 99;
 
+		// Whether the game is ACTUALLY paused, and how many open menus claim kPausesGame. Setting
+		// the flag is not the same as the game pausing, and the engine only renders the UI 3D
+		// scene while it is paused - so this is the effect, read from the UI, not our intent.
+		bool          gamePaused = false;
+		std::uint32_t pauseClaims = 0;
+
 		// What the mod loaded, and why it did not - so a run says which of the two halves failed
 		// without a second launch to find out.
 		bool          menuOpen = false;

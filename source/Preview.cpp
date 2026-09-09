@@ -39,6 +39,7 @@ namespace preview
 		std::uint32_t g_failures = 0;
 		bool         g_loggedUnavailable = false;
 		bool         g_loggedNoScene = false;
+		bool         g_sawManagerModel = false;
 
 		// What is currently attached to the game's UI 3D scene, and how many times we have
 		// attached - the counter is what a driving tool asserts on, because "a model is loaded"
@@ -287,6 +288,7 @@ namespace preview
 				g_model = node;
 				g_modelPath = path;
 				g_loaded = wanted;
+				g_sawManagerModel = false;
 				g_lastError.clear();
 				++g_loads;
 
@@ -389,6 +391,15 @@ namespace preview
 			}
 			g_appliedX = x; g_appliedY = y; g_appliedZ = z; g_appliedScale = scale;
 
+			// The manager's async load finishing is worth exactly one log line - it is the moment
+			// the half that actually draws becomes possible.
+			if (!g_sawManagerModel && mgr && mgr->GetRuntimeData().loadedModels.size() > 0)
+			{
+				g_sawManagerModel = true;
+				logger::info("preview: the 3D manager now holds {} model(s) - its async load finished",
+							 mgr->GetRuntimeData().loadedModels.size());
+			}
+
 			// Inventory3DManager::Render(), on the MAIN THREAD. The first version called this from
 			// the menu framework's Present hook and it drew nothing, which was written up as "this
 			// call is the wrong mechanism". That verdict was drawn from the wrong thread: the
@@ -427,6 +438,13 @@ namespace preview
 
 		if (!settings::general::show3DPreview) { wanted = false; }
 		if (!wanted && !g_attached && !g_begun) { return; }  // nothing wanted, nothing to undo
+
+		// KEEP TASKING WHILE SOMETHING IS WANTED. This used to stop as soon as our own node was
+		// attached, which quietly guaranteed the other half could never finish: the 3D manager
+		// builds its model on an ASYNCHRONOUS task, so loadedModels is still empty on the frame
+		// LoadInventoryItem is called and only fills in a frame or two later - by which time
+		// nothing was running to notice. Modex's preview works through the manager's own models
+		// (its scheme root has no children at all), so that half is the one that matters.
 
 		if (auto* tasks = SKSE::GetTaskInterface()) { tasks->AddTask([]() { Apply(); }); }
 	}
@@ -765,6 +783,11 @@ namespace preview
 		s.rawOverride = g_rawScale > 0.0F;
 		s.sceneAvailable = RE::UI3DSceneManager::GetSingleton() != nullptr;
 		s.hasParent = g_attached && g_attached->parent != nullptr;
+		if (auto* ui = RE::UI::GetSingleton())
+		{
+			s.gamePaused = ui->GameIsPaused();
+			s.pauseClaims = ui->numPausesGame;
+		}
 		if (auto* scene = RE::UI3DSceneManager::GetSingleton())
 		{
 			const auto idx = std::min<std::uint32_t>(settings::preview::scheme, 7);
