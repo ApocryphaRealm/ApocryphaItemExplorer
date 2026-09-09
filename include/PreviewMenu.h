@@ -44,6 +44,13 @@ namespace preview
 		// menu is being skipped rather than drawn with the wrong flags, and no combination of
 		// flags will help - a menu with no Scaleform movie would need one first.
 		void PreDisplay() override;
+
+		// THE slot the game renders its UI 3D scene from. Established by scanning the whole
+		// executable for callers of the scene render: three menus call it, all from a virtual of
+		// this shape - set up the scene, call the render, then display the movie. Each takes only
+		// `this` and tail-calls into uiMovie, which is IMenu's PostDisplay (slot 06), not
+		// PreDisplay (07) where this mod tried it first.
+		void PostDisplay() override;
 	};
 
 	// Registered once, at kDataLoaded. Safe to call twice; the second is a no-op.

@@ -86,6 +86,19 @@ namespace preview
 		bool          attached = false;
 		std::uint32_t attaches = 0;
 
+		// Read from the ENGINE, not from our own pointer. "attached" above is only this mod's flag
+		// saying it called AttachChild; these two say whether the node is actually parented into
+		// the scheme root the render draws. That distinction has already caused two wrong
+		// conclusions in this mod, so it is measured rather than assumed.
+		bool          hasParent = false;
+		std::uint32_t schemeRootChildren = 0;
+
+		// Inventory3DManager::currentLightScheme (+0x34). THIS is the value its Render passes to
+		// the scene render - not UI3DSceneManager's own +0x90, which is what has been reported all
+		// along. If the two disagree, the render draws a different scheme's root, which would be
+		// empty.
+		std::uint32_t managerScheme = 99;
+
 		// What the mod loaded, and why it did not - so a run says which of the two halves failed
 		// without a second launch to find out.
 		bool          menuOpen = false;
@@ -133,6 +146,17 @@ namespace preview
 	// This is how the inventory's own "UpdateItem3D" is located: the game's ActionScript calls it
 	// to show an item, so whatever it does is what a mod has to do too.
 	[[nodiscard]] std::string FxCallbacks(const std::string& a_menuName);
+
+	// Every direct call site of a function, found by scanning the whole module. This is how you
+	// ask "who calls this?" of a stripped binary: the answer names the code paths that drive a
+	// mechanism, which is the question that matters when the mechanism works in one context and
+	// not in another. Read-only.
+	[[nodiscard]] std::string CallSitesOf(std::uintptr_t a_targetOffset);
+
+	// Where a function's ADDRESS appears as data - a vtable slot or a function-pointer table.
+	// A function with no direct callers is reached indirectly, and this is what finds the table it
+	// is reached through. Read-only.
+	[[nodiscard]] std::string DataRefsTo(std::uintptr_t a_targetOffset);
 
 	// Hand back raw bytes from the running module, as hex, for disassembly outside the game.
 	// The on-disk exe is Steam-packed, so this is the only place those bytes exist (PREFLIGHT).

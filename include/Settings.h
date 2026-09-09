@@ -64,10 +64,20 @@ namespace settings
 		// (UI3DSceneManager), which the game renders inside its own pass - the mod does not issue
 		// the draw itself, because a draw issued from the menu overlay happens after that pass has
 		// finished and produces nothing at all.
+		// Off: the game's own item menus never move the UI scene's camera, and moving it to the
+		// origin is a good way to point it away from the model.
+		inline bool  overrideCamera = false;  // bOverrideCamera:Preview
 		inline float camFov = 45.0F;       // fCamFov:Preview
 		inline float camX = 0.0F;          // fCamX:Preview
 		inline float camY = 0.0F;          // fCamY:Preview
 		inline float camZ = 0.0F;          // fCamZ:Preview
+
+		// Which INTERFACE_LIGHT_SCHEME the model is attached under and rendered with. They must
+		// match: the render draws one scheme's root. 1 is kInventory - the inventory's own - but
+		// the three menus that call the render directly use 7 (lockpicking), 6 (stats) and 4
+		// (loading), so which schemes actually draw from a mod's own menu is a question to settle
+		// by trying them rather than by assuming.
+		inline std::uint32_t scheme = 1;   // uScheme:Preview
 	}
 
 	void Init(const std::string& a_iniFileName);

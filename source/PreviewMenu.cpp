@@ -2,6 +2,8 @@
 
 #include "PreviewMenu.h"
 
+#include "Settings.h"
+
 #include "utils/Logger.h"
 
 namespace preview
@@ -39,7 +41,8 @@ namespace preview
 
 			// A null camera makes the function use the scene's own, which is the one our page has
 			// been positioning all along.
-			render(scene, RE::INTERFACE_LIGHT_SCHEME::kInventory, nullptr, false);
+			render(scene, static_cast<RE::INTERFACE_LIGHT_SCHEME>(settings::preview::scheme),
+				   nullptr, false);
 		}
 	}
 
@@ -49,17 +52,26 @@ namespace preview
 		// this menu is not drawn through a Scaleform movie, which is true - it draws nothing at
 		// all - and kInventoryItemMenu is what marks it as one of the item-viewing family the UI
 		// 3D scene is rendered for.
+		// The flags InventoryMenu actually carries, and ONLY those. It is the menu whose 3D we are
+		// trying to reproduce, and CommonLibSSE records its set as:
+		//     kPausesGame | kDisablePauseMenu | kUpdateUsesCursor | kInventoryItemMenu | kCustomRendering
+		//
+		// Two flags this menu used to set are gone, and both were mistakes of mine:
+		//
+		//  * kRendersOffscreenTargets - added only so PreDisplay would fire as a diagnostic. The
+		//    inventory does NOT have it; of every menu open in gameplay only the HUD does. Its
+		//    purpose is to send a menu's rendering to an OFFSCREEN target, which a blank movie
+		//    would never composite - so it may well have been diverting our own render into a
+		//    buffer nothing draws.
+		//
+		//  * kPausesGame - the inventory has it, but pausing the game because a settings page is
+		//    open is a real cost to the player, and it changed nothing when tried.
 		menuFlags.set(RE::UI_MENU_FLAGS::kCustomRendering,
 					  RE::UI_MENU_FLAGS::kInventoryItemMenu,
-					  RE::UI_MENU_FLAGS::kRequiresUpdate,
-					  // Not because the preview needs an offscreen target, but because PreDisplay
-					  // is only called on menus that have this - and PreDisplay firing is the
-					  // evidence that the game renders this menu at all.
-					  RE::UI_MENU_FLAGS::kRendersOffscreenTargets);
+					  RE::UI_MENU_FLAGS::kRequiresUpdate);
 
-		// Deliberately NOT kPausesGame and NOT kUsesCursor: this menu is invisible scaffolding, and
-		// a settings page that silently paused the game or stole the cursor would be a bug the
-		// player could see even though the menu itself is not.
+		// Still NOT kUsesCursor - stealing the cursor from the framework's own menu would be
+		// visible to the player in a way this menu never should be.
 		inputContext = Context::kNone;
 
 		// The value IMenu itself defaults to, and what the inventory carries. It was 0 on the
@@ -98,34 +110,44 @@ namespace preview
 
 	void PreviewMenu::PreDisplay()
 	{
-		// Once only: this is per-frame code, and the standing rule is that nothing there logs
-		// unconditionally (rule 14).
+		// Kept only as evidence that the game renders this menu at all. The DRAW is in PostDisplay,
+		// which is where the game's own menus do it.
 		static bool logged = false;
 		if (!logged)
 		{
 			logged = true;
 			logger::info("preview menu: PreDisplay fired - the game IS rendering this menu");
 		}
+	}
 
-		// THE DRAW, in the one place it belongs: inside the game's own render pass, on a menu the
-		// game is rendering. Every earlier attempt lacked that - the same idea from the framework's
-		// Present hook drew nothing, and from a main-thread task drew nothing, because neither is
-		// a render pass.
+	void PreviewMenu::PostDisplay()
+	{
+		// EXACTLY WHAT THE GAME'S INVENTORY DOES, IN THE ORDER IT DOES IT.
 		//
-		// UI3DSceneManager's RENDER is the call, and CommonLibSSE does not bind it - it binds six
-		// methods of that class and this is not one of them. It was identified by dumping the
-		// class's code block out of the running game (the on-disk exe is Steam-packed) and reading
-		// it: of the fifteen functions in the block, exactly one touches both shader accumulators,
-		// the camera, the lights, the shadow scene node and the lock, across 366 instructions and
-		// 40 calls. Its prologue gives the signature - rcx this, edx compared against
-		// currentlightScheme at +0x90, r8 a camera pointer that falls back to this->camera when
-		// null, r9b a flag - so it is called here with the scene's own camera.
-		RenderUIScene();
+		// InventoryMenu::PostDisplay is nine instructions. Its address came out of the live vtable
+		// (slot 6, +0x88DAE0 on 1.5.97) and it disassembles to:
+		//
+		//     mov  rcx, [this+0x10]              ; uiMovie
+		//     test rcx, rcx / je                 ; only if it has one
+		//     call [rax+0x130]                   ; DISPLAY THE MOVIE FIRST
+		//     mov  rcx, [Inventory3DManager]
+		//     jmp  Inventory3DManager::Render    ; THEN the 3D
+		//
+		// Two things every earlier attempt had wrong. The ORDER: the 3D is rendered after the movie
+		// is displayed, not before. And the CALL: a bare Render(), no light scheme and no camera -
+		// so the scheme sweep and the hand-bound UI3DSceneManager render were both answering a
+		// question the game never asks.
+		IMenu::PostDisplay();
 
-		// And the 3D manager's own render, which draws the models IT holds. Those are now populated
-		// the way the game populates them (the one-argument LoadInventoryItem), so unlike every
-		// earlier attempt this call has something to draw.
 		if (auto* mgr = RE::Inventory3DManager::GetSingleton()) { mgr->Render(); }
+
+		// Once only - this is per-frame code (rule 14).
+		static bool logged = false;
+		if (!logged)
+		{
+			logged = true;
+			logger::info("preview menu: PostDisplay - movie displayed, then Inventory3DManager::Render");
+		}
 	}
 
 	void RegisterPreviewMenu()

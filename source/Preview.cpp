@@ -258,7 +258,7 @@ namespace preview
 				// but it still owns the scheme stack.
 				if (mgr && !g_begun)
 				{
-					mgr->Begin3D(RE::INTERFACE_LIGHT_SCHEME::kInventory);
+					mgr->Begin3D(static_cast<RE::INTERFACE_LIGHT_SCHEME>(settings::preview::scheme));
 					g_begun = true;
 					logger::info("preview: pushed the kInventory light scheme onto the UI 3D scene");
 				}
@@ -310,17 +310,40 @@ namespace preview
 					g_attached = model;
 					if (g_attached)
 					{
-						scene->AttachChild(g_attached, RE::INTERFACE_LIGHT_SCHEME::kInventory);
+						scene->AttachChild(g_attached,
+									   static_cast<RE::INTERFACE_LIGHT_SCHEME>(settings::preview::scheme));
+
+					// MAKE IT VISIBLE. A node handed back by BSModelDB::Demand has had none of the
+					// setup the game's own load path does, and two things there will render it
+					// perfectly invisibly: the hidden flag, and - for the BSFadeNode that weapon
+					// and armour models are - a currentFade of 0, which is fully transparent. The
+					// inventory never hits this because its load path fades its item in.
+					g_attached->flags.reset(RE::NiAVObject::Flag::kHidden);
+					if (auto* fade = netimmerse_cast<RE::BSFadeNode*>(g_attached))
+					{
+						fade->currentFade = 1.0F;
+						logger::info("preview: BSFadeNode - fade forced to 1 (a Demand'd node "
+									 "starts fully transparent)");
+					}
 						++g_attaches;
 						logger::info("preview: attached \"{}\" to the UI 3D scene", g_loaded->GetName());
 					}
 				}
 
-				// The camera is the scene's, not the model's, so it is set every frame alongside the
-				// placement rather than once at attach time - the inventory moves it when it runs.
-				scene->SetCameraFOV(settings::preview::camFov);
-				scene->SetCameraPosition(RE::NiPoint3(settings::preview::camX, settings::preview::camY,
-													  settings::preview::camZ));
+				// THE CAMERA IS LEFT ALONE BY DEFAULT, and that is a fix rather than an omission.
+				// This used to call SetCameraPosition(0,0,0) and SetCameraFOV(45) every frame,
+				// which drags the scene's camera to the origin with whatever rotation it happens
+				// to hold - quite possibly pointing nowhere near the model. The game's own item
+				// menus never move this camera: they position the ITEM and let the camera stand.
+				//
+				// The old behaviour stays reachable for experiments, but off unless asked for.
+				if (settings::preview::overrideCamera)
+				{
+					scene->SetCameraFOV(settings::preview::camFov);
+					scene->SetCameraPosition(RE::NiPoint3(settings::preview::camX,
+														  settings::preview::camY,
+														  settings::preview::camZ));
+				}
 			}
 			else if (!g_loggedNoScene)
 			{
@@ -622,6 +645,85 @@ namespace preview
 		return out;
 	}
 
+	std::string CallSitesOf(std::uintptr_t a_targetOffset)
+	{
+		const auto base = REL::Module::get().base();
+
+		// Only the executable segment: scanning data for byte patterns would be noise, and .text is
+		// where calls live anyway.
+		const auto text = REL::Module::get().segment(REL::Segment::textx);
+		const std::uintptr_t textStart = text.address();
+		const std::uintptr_t textSize = text.size();
+		if (a_targetOffset == 0 || textStart == 0 || textSize == 0) { return R"({"error":"no text segment"})"; }
+
+		const std::uintptr_t target = base + a_targetOffset;
+		const auto*          bytes = reinterpret_cast<const std::uint8_t*>(textStart);
+		const std::uintptr_t size = textSize;
+
+		std::string out = std::format(R"({{"target":"0x{:X}","textStart":"0x{:X}","textSize":"0x{:X}","sites":[)",
+									  a_targetOffset, textStart - base, textSize);
+		bool  first = true;
+		int   found = 0;
+
+		// E8 rel32: the direct call. An E8 byte can also fall inside another instruction's operand,
+		// so a hit is a candidate rather than a certainty - but a candidate whose rel32 happens to
+		// land exactly on this function is almost always real, and the ones that are not stand out
+		// when the caller is disassembled.
+		for (std::uintptr_t i = 0; i + 5 < size && found < 64; ++i)
+		{
+			if (bytes[i] != 0xE8) { continue; }
+			std::int32_t rel = 0;
+			std::memcpy(&rel, bytes + i + 1, sizeof(rel));
+			if (textStart + i + 5 + rel != target) { continue; }
+			if (!first) { out += ','; }
+			first = false;
+			++found;
+			out += std::format(R"("0x{:X}")", textStart + i - base);
+		}
+		out += std::format(R"(],"found":{}}})", found);
+		return out;
+	}
+
+	std::string DataRefsTo(std::uintptr_t a_targetOffset)
+	{
+		const auto base = REL::Module::get().base();
+		if (a_targetOffset == 0) { return R"({"error":"no target"})"; }
+		const std::uintptr_t target = base + a_targetOffset;
+
+		// The read-only and read-write data segments: vtables live in .rdata, and function-pointer
+		// tables the game builds at run time live in .data.
+		const REL::Segment segments[] = {
+			REL::Module::get().segment(REL::Segment::rdata),
+			REL::Module::get().segment(REL::Segment::data)
+		};
+		static constexpr const char* names[] = { "rdata", "data" };
+
+		std::string out = std::format(R"({{"target":"0x{:X}","refs":[)", a_targetOffset);
+		bool first = true;
+		int  found = 0;
+
+		for (int seg = 0; seg < 2 && found < 32; ++seg)
+		{
+			const std::uintptr_t start = segments[seg].address();
+			const std::uintptr_t size = segments[seg].size();
+			if (!start || size < sizeof(std::uintptr_t)) { continue; }
+
+			// Pointers are 8-byte aligned in these tables, so step by 8 rather than by 1.
+			for (std::uintptr_t i = 0; i + sizeof(std::uintptr_t) <= size && found < 32; i += sizeof(std::uintptr_t))
+			{
+				std::uintptr_t value = 0;
+				std::memcpy(&value, reinterpret_cast<const void*>(start + i), sizeof(value));
+				if (value != target) { continue; }
+				if (!first) { out += ','; }
+				first = false;
+				++found;
+				out += std::format(R"({{"seg":"{}","at":"0x{:X}"}})", names[seg], start + i - base);
+			}
+		}
+		out += std::format(R"(],"found":{}}})", found);
+		return out;
+	}
+
 	std::string DumpBytes(std::uintptr_t a_offset, std::size_t a_length)
 	{
 		const auto base = REL::Module::get().base();
@@ -662,12 +764,22 @@ namespace preview
 		s.posX = g_appliedX; s.posY = g_appliedY; s.posZ = g_appliedZ; s.scale = g_appliedScale;
 		s.rawOverride = g_rawScale > 0.0F;
 		s.sceneAvailable = RE::UI3DSceneManager::GetSingleton() != nullptr;
+		s.hasParent = g_attached && g_attached->parent != nullptr;
+		if (auto* scene = RE::UI3DSceneManager::GetSingleton())
+		{
+			const auto idx = std::min<std::uint32_t>(settings::preview::scheme, 7);
+			if (auto* root = scene->menuObjects[idx].get())
+			{
+				s.schemeRootChildren = static_cast<std::uint32_t>(root->children.size());
+			}
+		}
 		s.attached = g_attached != nullptr;
 		s.attaches = g_attaches;
 		s.menuOpen = PreviewMenuOpen();
 		if (auto* mgr = RE::Inventory3DManager::GetSingleton())
 		{
 			s.managerModels = static_cast<std::uint32_t>(mgr->GetRuntimeData().loadedModels.size());
+			s.managerScheme = static_cast<std::uint32_t>(mgr->currentLightScheme);
 		}
 		s.modelPath = g_modelPath;
 		s.lastError = g_lastError;

@@ -143,6 +143,24 @@ namespace DevBenchTool
 			//                    menu that genuinely renders that scene. The two together are the
 			//                    comparison: same object, one context that works and one that does not.
 			// op=scanmenu - the game's InventoryMenu::PreDisplay, and everything it calls.
+			// op=xrefs:<hex offset> - every direct call site of that function, module-wide.
+			if (const auto at = args.find("xrefs:"); at != std::string_view::npos)
+			{
+				std::uintptr_t off = 0;
+				std::sscanf(std::string(args.substr(at + 6, 24)).c_str(), "%llx", &off);
+				a_write(a_sink, std::format(R"({{"ok":true,"op":"xrefs","xrefs":{}}})",
+											preview::CallSitesOf(off)).c_str());
+				return;
+			}
+			// op=datarefs:<hex offset> - where that function's address appears as data.
+			if (const auto at = args.find("datarefs:"); at != std::string_view::npos)
+			{
+				std::uintptr_t off = 0;
+				std::sscanf(std::string(args.substr(at + 9, 24)).c_str(), "%llx", &off);
+				a_write(a_sink, std::format(R"({{"ok":true,"op":"datarefs","datarefs":{}}})",
+											preview::DataRefsTo(off)).c_str());
+				return;
+			}
 			// op=fx:<MenuName> - the GameDelegate callbacks a live menu has registered.
 			if (const auto at = args.find("fx:"); at != std::string_view::npos)
 			{
@@ -204,20 +222,33 @@ namespace DevBenchTool
 				a_write(a_sink, std::format(R"({{"ok":true,"op":"openmenu","name":"{}"}})", EscapeJson(name)).c_str());
 				return;
 			}
+			// op=scheme:<0-7> - the light scheme the model is attached under and rendered with.
+			// Changing it re-attaches, so one launch can try every scheme.
+			if (const auto at = args.find("scheme:"); at != std::string_view::npos)
+			{
+				unsigned v = 1;
+                std::sscanf(std::string(args.substr(at + 7, 8)).c_str(), "%u", &v);
+				if (v > 7) { v = 1; }
+				settings::preview::scheme = v;
+				preview::Hide();
+				a_write(a_sink, std::format(R"({{"ok":true,"op":"scheme","scheme":{}}})", v).c_str());
+				return;
+			}
 			if (has("previewstate"))
 			{
 				const auto st = preview::GetStatus();
 				a_write(a_sink, std::format(
 					R"({{"ok":true,"op":"previewstate","available":{},"showing":{},"formID":"0x{:08X}",)"
 					R"("loads":{},"frameDrawn":{},"rawOverride":{},)"
-					R"("sceneAvailable":{},"attached":{},"attaches":{},"failures":{},)"
-					R"("menuOpen":{},"managerModels":{},"modelPath":"{}","lastError":"{}",)"
+					R"("sceneAvailable":{},"attached":{},"hasParent":{},"rootChildren":{},"attaches":{},"failures":{},)"
+					R"("menuOpen":{},"managerModels":{},"managerScheme":{},"modelPath":"{}","lastError":"{}",)"
 					R"("pane":{{"cx":{:.3f},"cy":{:.3f},"size":{:.3f},"x0":{:.0f},"y0":{:.0f},"x1":{:.0f},"y1":{:.0f}}},)"
 					R"("applied":{{"x":{:.2f},"y":{:.2f},"z":{:.2f},"scale":{:.3f}}}}})",
 					st.available ? "true" : "false", st.showing ? "true" : "false", st.currentFormID,
 					st.loads, st.frameDrawn ? "true" : "false", st.rawOverride ? "true" : "false",
-					st.sceneAvailable ? "true" : "false", st.attached ? "true" : "false", st.attaches, st.failures,
-					st.menuOpen ? "true" : "false", st.managerModels, EscapeJson(st.modelPath), EscapeJson(st.lastError),
+					st.sceneAvailable ? "true" : "false", st.attached ? "true" : "false",
+					st.hasParent ? "true" : "false", st.schemeRootChildren, st.attaches, st.failures,
+					st.menuOpen ? "true" : "false", st.managerModels, st.managerScheme, EscapeJson(st.modelPath), EscapeJson(st.lastError),
 					settings::preview::paneX, settings::preview::paneY, settings::preview::paneSize,
 					st.paneX0, st.paneY0, st.paneX1, st.paneY1,
 					st.posX, st.posY, st.posZ, st.scale).c_str());
