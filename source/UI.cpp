@@ -42,23 +42,32 @@ namespace UI
 			g_kindInit = true;
 		}
 
+		// Every ImGui call this page makes, as the symbol the framework must export. The wrappers
+		// in SKSEMenuFramework.h resolve these with GetProcAddress and then CALL THE RESULT WITHOUT
+		// CHECKING IT, so a symbol the loaded framework does not have is a jump to address zero.
+		// That is not theoretical: Apocrypha Menu Framework 1.4.9 exports 50 functions and has none
+		// of the table API, no igSmallButton and no igInputTextWithHint, and calling them crashed the
+		// game the moment this page drew. So the page is built from the calls 1.4.9 already has, and
+		// this check refuses to register at all if even one of them is missing.
+		constexpr const char* kRequired[] = {
+			"AddSectionItem",
+			"igTextV", "igTextDisabledV", "igTextWrappedV",
+			"igButton", "igCheckbox", "igInputInt", "igInputText",
+			"igSelectable_Bool", "igBeginChild_Str", "igEndChild",
+			"igSeparator", "igSeparatorText", "igSpacing", "igSameLine",
+			"igPushItemWidth", "igPopItemWidth", "igPushID_Str", "igPopID"
+		};
+
 		bool HasRequiredExports()
 		{
-			constexpr const char* required[] = {
-				"AddSectionItem", "igTextV", "igTextWrappedV", "igSeparatorText",
-				"igButton", "igSmallButton", "igSameLine", "igSpacing", "igSeparator",
-				"igInputTextWithHint", "igInputInt", "igCheckbox", "igSelectable_Bool",
-				"igBeginChild_Str", "igEndChild", "igBeginTable", "igEndTable",
-				"igTableNextRow", "igTableNextColumn", "igTableSetupColumn", "igTableHeadersRow",
-				"igPushItemWidth", "igPopItemWidth", "igTextDisabledV"
-			};
-			const HMODULE mod = GetModuleHandleA("SKSEMenuFramework.dll");
-			if (!mod) { return true; }  // the framework answers through its own alias; assume current
-			for (const char* name : required)
+			for (const char* name : kRequired)
 			{
-				if (!GetProcAddress(mod, name))
+				// Resolved exactly the way the header's own wrappers resolve it, so this cannot
+				// disagree with what they will actually call.
+				if (!GetMenuFrameworkFunction<void*>(name))
 				{
-					logger::warn("menu framework is missing \"{}\"", name);
+					logger::warn("the loaded menu framework does not export \"{}\"; the page will not "
+								 "be registered rather than risk calling a null pointer", name);
 					return false;
 				}
 			}
@@ -77,51 +86,53 @@ namespace UI
 				if ((i % 4) != 3 && i + 1 < kKindCount) { ImGuiMCP::SameLine(); }
 			}
 			ImGuiMCP::Spacing();
-			if (ImGuiMCP::SmallButton(strings::TR("AIE_All", "All")))
+			if (ImGuiMCP::Button(strings::TR("AIE_All", "All")))
 			{
 				for (bool& b : g_kind) { b = true; }
 			}
 			ImGuiMCP::SameLine();
-			if (ImGuiMCP::SmallButton(strings::TR("AIE_None", "None")))
+			if (ImGuiMCP::Button(strings::TR("AIE_None", "None")))
 			{
 				for (bool& b : g_kind) { b = false; }
 			}
 		}
 
+		// One item as a plain row: the Add button, the name, then the quiet details. No table API -
+		// older frameworks do not export it, and a row reads just as well.
 		void DrawItemRow(const Catalog::Item& a_item, bool a_showPlugin)
 		{
-			ImGuiMCP::TableNextRow();
+			// The form ID makes every row's widgets unique; without it ImGui merges buttons that
+			// share a label and clicking one adds a different item.
+			const std::string id = std::to_string(a_item.formID);
+			ImGuiMCP::PushID(id.c_str());
 
-			ImGuiMCP::TableNextColumn();
-			ImGuiMCP::Text("%s", a_item.name.empty() ? a_item.editorID.c_str() : a_item.name.c_str());
-
-			ImGuiMCP::TableNextColumn();
-			ImGuiMCP::TextDisabled("%s", Catalog::KindName(a_item.kind));
-
-			if (a_showPlugin)
+			if (ImGuiMCP::Button(strings::TR("AIE_Add", "Add")))
 			{
-				ImGuiMCP::TableNextColumn();
-				const auto& plugins = Catalog::Plugins();
-				ImGuiMCP::TextDisabled("%s", a_item.pluginIndex < plugins.size()
-											 ? plugins[a_item.pluginIndex].fileName.c_str() : "?");
-			}
-
-			ImGuiMCP::TableNextColumn();
-			ImGuiMCP::TextDisabled("0x%08X", a_item.formID);
-
-			ImGuiMCP::TableNextColumn();
-			// The button label has to be unique per row or ImGui merges them, so the form ID goes
-			// into an id suffix rather than into the visible text.
-			const std::string label = std::string(strings::TR("AIE_Add", "Add")) +
-									  "##" + std::to_string(a_item.formID);
-			if (ImGuiMCP::SmallButton(label.c_str()))
-			{
-				const auto count = static_cast<std::uint32_t>(std::max(1, g_addCount));
+				const auto count = static_cast<std::uint32_t>(g_addCount < 1 ? 1 : g_addCount);
 				Catalog::GiveToPlayer(a_item.form, count);
 				g_status = std::string(strings::TR("AIE_Added", "Added")) + " " +
 						   std::to_string(count) + " x " +
 						   (a_item.name.empty() ? a_item.editorID : a_item.name);
 			}
+
+			ImGuiMCP::SameLine();
+			ImGuiMCP::Text("%s", a_item.name.empty() ? a_item.editorID.c_str() : a_item.name.c_str());
+
+			ImGuiMCP::SameLine();
+			if (a_showPlugin)
+			{
+				const auto& plugins = Catalog::Plugins();
+				ImGuiMCP::TextDisabled("- %s, %s, 0x%08X", Catalog::KindName(a_item.kind),
+									   a_item.pluginIndex < plugins.size()
+										   ? plugins[a_item.pluginIndex].fileName.c_str() : "?",
+									   a_item.formID);
+			}
+			else
+			{
+				ImGuiMCP::TextDisabled("- %s, 0x%08X", Catalog::KindName(a_item.kind), a_item.formID);
+			}
+
+			ImGuiMCP::PopID();
 		}
 	}
 
@@ -176,7 +187,7 @@ namespace UI
 					   static_cast<int>(plugins.size()), strings::TR("AIE_Plugins", "plugins"),
 					   static_cast<int>(Catalog::Items().size()), strings::TR("AIE_Items", "items"));
 		ImGuiMCP::SameLine();
-		if (ImGuiMCP::SmallButton(strings::TR("AIE_Rebuild", "Re-read")))
+		if (ImGuiMCP::Button(strings::TR("AIE_Rebuild", "Re-read")))
 		{
 			Catalog::Build();
 			g_selectedPlugin = -1;
@@ -198,9 +209,8 @@ namespace UI
 		if (g_searchEverywhere)
 		{
 			ImGuiMCP::PushItemWidth(420.0F);
-			ImGuiMCP::InputTextWithHint("##search_all", strings::TR("AIE_SearchHint",
-										"Search every plugin by name or editor ID"),
-										g_itemSearch, sizeof(g_itemSearch));
+			ImGuiMCP::Text("%s", strings::TR("AIE_SearchHint", "Search every plugin by name or editor ID"));
+			ImGuiMCP::InputText("##search_all", g_itemSearch, sizeof(g_itemSearch));
 			ImGuiMCP::PopItemWidth();
 
 			const auto hits = Catalog::SearchAll(g_itemSearch, g_kind, kSearchLimit);
@@ -215,17 +225,11 @@ namespace UI
 								   hits.size() >= kSearchLimit
 									   ? strings::TR("AIE_Capped", " (showing the first 500)") : "");
 
-			if (ImGuiMCP::BeginTable("aie_all", 5, 0))
+			if (ImGuiMCP::BeginChild("aie_all", ImGuiMCP::ImVec2(0.0F, 460.0F), 1))
 			{
-				ImGuiMCP::TableSetupColumn(strings::TR("AIE_Name", "Name"));
-				ImGuiMCP::TableSetupColumn(strings::TR("AIE_Kind", "Kind"));
-				ImGuiMCP::TableSetupColumn(strings::TR("AIE_Plugin", "Plugin"));
-				ImGuiMCP::TableSetupColumn(strings::TR("AIE_FormID", "Form ID"));
-				ImGuiMCP::TableSetupColumn("");
-				ImGuiMCP::TableHeadersRow();
 				for (const auto* item : hits) { DrawItemRow(*item, true); }
-				ImGuiMCP::EndTable();
 			}
+			ImGuiMCP::EndChild();
 
 			if (!g_status.empty())
 			{
@@ -237,13 +241,15 @@ namespace UI
 
 		// ---- Plugin, then its items ----
 		ImGuiMCP::PushItemWidth(300.0F);
-		ImGuiMCP::InputTextWithHint("##plugin_filter", strings::TR("AIE_FilterPlugins", "Filter plugins"),
-									g_pluginFilter, sizeof(g_pluginFilter));
+		ImGuiMCP::Text("%s", strings::TR("AIE_FilterPlugins", "Filter plugins"));
+		ImGuiMCP::SameLine();
+		ImGuiMCP::InputText("##plugin_filter", g_pluginFilter, sizeof(g_pluginFilter));
 		ImGuiMCP::PopItemWidth();
 		ImGuiMCP::SameLine();
 		ImGuiMCP::PushItemWidth(300.0F);
-		ImGuiMCP::InputTextWithHint("##item_search", strings::TR("AIE_FilterItems", "Filter items"),
-									g_itemSearch, sizeof(g_itemSearch));
+		ImGuiMCP::Text("%s", strings::TR("AIE_FilterItems", "Filter items"));
+		ImGuiMCP::SameLine();
+		ImGuiMCP::InputText("##item_search", g_itemSearch, sizeof(g_itemSearch));
 		ImGuiMCP::PopItemWidth();
 		ImGuiMCP::Spacing();
 
@@ -291,16 +297,7 @@ namespace UI
 				ImGuiMCP::TextDisabled("%s - %d %s", plugins[g_selectedPlugin].fileName.c_str(),
 									   static_cast<int>(items.size()), strings::TR("AIE_Shown", "shown"));
 
-				if (ImGuiMCP::BeginTable("aie_one", 4, 0))
-				{
-					ImGuiMCP::TableSetupColumn(strings::TR("AIE_Name", "Name"));
-					ImGuiMCP::TableSetupColumn(strings::TR("AIE_Kind", "Kind"));
-					ImGuiMCP::TableSetupColumn(strings::TR("AIE_FormID", "Form ID"));
-					ImGuiMCP::TableSetupColumn("");
-					ImGuiMCP::TableHeadersRow();
-					for (const auto* item : items) { DrawItemRow(*item, false); }
-					ImGuiMCP::EndTable();
-				}
+				for (const auto* item : items) { DrawItemRow(*item, false); }
 			}
 		}
 		ImGuiMCP::EndChild();

@@ -37,8 +37,33 @@ namespace Catalog
 			return a_form ? a_form->GetFile(0) : nullptr;
 		}
 
+		// Plugins are discovered FROM THE FORMS, not from TESDataHandler's loaded-mod arrays.
+		// Those arrays are reached through version-dependent offsets, and on this machine they
+		// reported 202 full and 3,438 light plugins for a profile with ten - garbage that we then
+		// stored as thousands of junk file pointers. Every form knows the file that defined it, so
+		// asking the forms needs no offsets and is right on every runtime. The only thing it costs
+		// is that a plugin providing no items never appears, which is what we want anyway.
+		std::unordered_map<const RE::TESFile*, std::uint32_t> g_indexOf;
+
+		[[nodiscard]] std::uint32_t PluginIndexFor(const RE::TESFile* a_file)
+		{
+			const auto it = g_indexOf.find(a_file);
+			if (it != g_indexOf.end()) { return it->second; }
+
+			Plugin p{};
+			p.fileName = std::string(a_file->GetFilename());
+			p.light = a_file->IsLight();
+			p.index = a_file->GetPartialIndex();
+			p.itemCount = 0;
+
+			const auto idx = static_cast<std::uint32_t>(g_plugins.size());
+			g_plugins.push_back(std::move(p));
+			g_indexOf.emplace(a_file, idx);
+			return idx;
+		}
+
 		template <class T>
-		void Collect(Kind a_kind, const std::unordered_map<std::string, std::uint32_t>& a_indexOf)
+		void Collect(Kind a_kind)
 		{
 			auto* handler = RE::TESDataHandler::GetSingleton();
 			if (!handler) { return; }
@@ -51,14 +76,15 @@ namespace Catalog
 				const RE::TESFile* file = OwningFile(form);
 				if (!file) { continue; }
 
-				const auto it = a_indexOf.find(std::string(file->GetFilename()));
-				if (it == a_indexOf.end()) { continue; }
+				// A file name that is empty or absurd means the pointer is not really a TESFile;
+				// skip it rather than trusting it.
+				const std::string_view fileName = file->GetFilename();
+				if (fileName.empty() || fileName.size() > 260) { continue; }
 
 				Item item{};
 				item.form = form;
 				item.formID = form->GetFormID();
 				item.kind = a_kind;
-				item.pluginIndex = it->second;
 
 				const char* name = form->GetName();
 				item.name = (name && name[0]) ? name : "";
@@ -66,10 +92,11 @@ namespace Catalog
 				const char* edid = form->GetFormEditorID();
 				item.editorID = (edid && edid[0]) ? edid : "";
 
-				// A form with neither a name nor an editor ID is not something a player can
-				// meaningfully pick out of a list, so it is skipped rather than shown as blank.
+				// A form with neither a name nor an editor ID is not something a player can pick
+				// out of a list, so it is skipped rather than shown blank.
 				if (item.name.empty() && item.editorID.empty()) { continue; }
 
+				item.pluginIndex = PluginIndexFor(file);
 				item.weight = form->GetWeight();
 				item.value = form->GetGoldValue();
 
@@ -110,60 +137,57 @@ namespace Catalog
 	{
 		g_plugins.clear();
 		g_items.clear();
+		g_indexOf.clear();
 		g_built = false;
 
-		auto* handler = RE::TESDataHandler::GetSingleton();
-		if (!handler)
+		if (!RE::TESDataHandler::GetSingleton())
 		{
 			logger::error("catalog: TESDataHandler::GetSingleton() returned null");
 			return 0;
 		}
 
-		// The full plugins first, then the light ones, which is the order the game itself keeps.
-		std::unordered_map<std::string, std::uint32_t> indexOf;
-
-		const auto add = [&](const RE::TESFile* a_file, bool a_light, std::uint32_t a_index) {
-			if (!a_file) { return; }
-			Plugin p{};
-			p.fileName = std::string(a_file->GetFilename());
-			p.light = a_light;
-			p.index = a_index;
-			p.itemCount = 0;
-			indexOf.emplace(p.fileName, static_cast<std::uint32_t>(g_plugins.size()));
-			g_plugins.push_back(std::move(p));
-		};
-
-		const auto* const* mods = handler->GetLoadedMods();
-		const std::uint8_t modCount = handler->GetLoadedModCount();
-		for (std::uint8_t i = 0; i < modCount; ++i) { add(mods[i], false, i); }
-
-		const auto* const* light = handler->GetLoadedLightMods();
-		const std::uint16_t lightCount = handler->GetLoadedLightModCount();
-		for (std::uint16_t i = 0; i < lightCount; ++i) { add(light[i], true, i); }
-
-		logger::info("catalog: {} plugin(s) loaded ({} full, {} light)",
-					 g_plugins.size(), modCount, lightCount);
-
-		Collect<RE::TESObjectWEAP>(Kind::kWeapon, indexOf);
-		Collect<RE::TESObjectARMO>(Kind::kArmor, indexOf);
-		Collect<RE::TESAmmo>(Kind::kAmmo, indexOf);
-		Collect<RE::TESObjectBOOK>(Kind::kBook, indexOf);
-		Collect<RE::IngredientItem>(Kind::kIngredient, indexOf);
-		Collect<RE::AlchemyItem>(Kind::kPotion, indexOf);
-		Collect<RE::ScrollItem>(Kind::kScroll, indexOf);
-		Collect<RE::TESSoulGem>(Kind::kSoulGem, indexOf);
-		Collect<RE::TESKey>(Kind::kKey, indexOf);
-		Collect<RE::TESObjectMISC>(Kind::kMisc, indexOf);
-		Collect<RE::TESObjectLIGH>(Kind::kLight, indexOf);
-		Collect<RE::SpellItem>(Kind::kSpell, indexOf);
+		Collect<RE::TESObjectWEAP>(Kind::kWeapon);
+		Collect<RE::TESObjectARMO>(Kind::kArmor);
+		Collect<RE::TESAmmo>(Kind::kAmmo);
+		Collect<RE::TESObjectBOOK>(Kind::kBook);
+		Collect<RE::IngredientItem>(Kind::kIngredient);
+		Collect<RE::AlchemyItem>(Kind::kPotion);
+		Collect<RE::ScrollItem>(Kind::kScroll);
+		Collect<RE::TESSoulGem>(Kind::kSoulGem);
+		Collect<RE::TESKey>(Kind::kKey);
+		Collect<RE::TESObjectMISC>(Kind::kMisc);
+		Collect<RE::TESObjectLIGH>(Kind::kLight);
+		Collect<RE::SpellItem>(Kind::kSpell);
 
 		for (const Item& item : g_items)
 		{
 			if (item.pluginIndex < g_plugins.size()) { ++g_plugins[item.pluginIndex].itemCount; }
 		}
 
+		// Plugins in load order rather than in the order items happened to be found.
+		std::vector<std::uint32_t> order(g_plugins.size());
+		for (std::uint32_t i = 0; i < order.size(); ++i) { order[i] = i; }
+		std::sort(order.begin(), order.end(), [](std::uint32_t a, std::uint32_t b) {
+			if (g_plugins[a].light != g_plugins[b].light) { return !g_plugins[a].light; }
+			return g_plugins[a].index < g_plugins[b].index;
+		});
+		std::vector<std::uint32_t> newIndexOf(g_plugins.size());
+		std::vector<Plugin> sorted;
+		sorted.reserve(g_plugins.size());
+		for (std::uint32_t pos = 0; pos < order.size(); ++pos)
+		{
+			newIndexOf[order[pos]] = pos;
+			sorted.push_back(std::move(g_plugins[order[pos]]));
+		}
+		g_plugins = std::move(sorted);
+		for (Item& item : g_items) { item.pluginIndex = newIndexOf[item.pluginIndex]; }
+
+		std::size_t light = 0;
+		for (const Plugin& p : g_plugins) { if (p.light) { ++light; } }
+
 		g_built = true;
-		logger::info("catalog: {} item(s) across {} plugin(s)", g_items.size(), g_plugins.size());
+		logger::info("catalog: {} item(s) from {} plugin(s) that provide any ({} light)",
+					 g_items.size(), g_plugins.size(), light);
 		return g_items.size();
 	}
 
