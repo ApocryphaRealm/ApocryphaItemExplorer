@@ -569,7 +569,11 @@ namespace preview
 			RE::NiNode* slot = scene->menuObjects[i].get();
 			if (!slot) { continue; }
 			++st.occupiedSlots;
-			if (g_attached && slot == g_attached) { st.ourSlot = i; }
+			// menuObjects[] holds the eight scheme ROOTS, and our model is attached as a CHILD of
+			// one of them - so comparing the model against a root can never match, and the -1 this
+			// used to report was not evidence of anything. Ask whether the model's PARENT is this
+			// root, which is the question that was meant all along (rule 30: ask the object).
+			if (g_attached && g_attached->parent == slot) { st.ourSlot = i; }
 		}
 
 		// The same object seen through its other declaration, which is the one carrying the menu
