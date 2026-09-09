@@ -138,18 +138,41 @@ namespace DevBenchTool
 											x, y, z, sc).c_str());
 				return;
 			}
+			// op=uiscene       - what the game's UI 3D scene holds right now.
+			// op=openinventory - open the game's OWN inventory, so uiscene can be read against a
+			//                    menu that genuinely renders that scene. The two together are the
+			//                    comparison: same object, one context that works and one that does not.
+			if (has("uiscene"))
+			{
+				const auto sc = preview::GetSceneState();
+				a_write(a_sink, std::format(
+					R"({{"ok":{},"op":"uiscene","cameraPresent":{},"occupiedSlots":{},"ourSlot":{},)"
+					R"("lightScheme":{},"currentMenu":{},"menuIDCount":{},"lightCount":{}}})",
+					sc.available ? "true" : "false", sc.cameraPresent ? "true" : "false",
+					sc.occupiedSlots, sc.ourSlot, sc.lightScheme, sc.currentMenu,
+					sc.menuIDCount, sc.lightCount).c_str());
+				return;
+			}
+			if (has("openinventory"))
+			{
+				preview::OpenGameInventory();
+				a_write(a_sink, R"({"ok":true,"op":"openinventory"})");
+				return;
+			}
 			if (has("previewstate"))
 			{
 				const auto st = preview::GetStatus();
 				a_write(a_sink, std::format(
 					R"({{"ok":true,"op":"previewstate","available":{},"showing":{},"formID":"0x{:08X}",)"
 					R"("loads":{},"frameDrawn":{},"rawOverride":{},)"
-					R"("sceneAvailable":{},"attached":{},"attaches":{},)"
+					R"("sceneAvailable":{},"attached":{},"attaches":{},"failures":{},)"
+					R"("modelPath":"{}","lastError":"{}",)"
 					R"("pane":{{"cx":{:.3f},"cy":{:.3f},"size":{:.3f},"x0":{:.0f},"y0":{:.0f},"x1":{:.0f},"y1":{:.0f}}},)"
 					R"("applied":{{"x":{:.2f},"y":{:.2f},"z":{:.2f},"scale":{:.3f}}}}})",
 					st.available ? "true" : "false", st.showing ? "true" : "false", st.currentFormID,
 					st.loads, st.frameDrawn ? "true" : "false", st.rawOverride ? "true" : "false",
-					st.sceneAvailable ? "true" : "false", st.attached ? "true" : "false", st.attaches,
+					st.sceneAvailable ? "true" : "false", st.attached ? "true" : "false", st.attaches, st.failures,
+					EscapeJson(st.modelPath), EscapeJson(st.lastError),
 					settings::preview::paneX, settings::preview::paneY, settings::preview::paneSize,
 					st.paneX0, st.paneY0, st.paneX1, st.paneY1,
 					st.posX, st.posY, st.posZ, st.scale).c_str());

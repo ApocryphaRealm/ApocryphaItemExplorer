@@ -10,7 +10,10 @@
 #include "utils/Strings.h"
 
 #include <algorithm>
+#include <cctype>
+#include <format>
 #include <mutex>
+#include <string>
 
 namespace preview
 {
@@ -37,8 +40,17 @@ namespace preview
 		// What is currently attached to the game's UI 3D scene, and how many times we have
 		// attached - the counter is what a driving tool asserts on, because "a model is loaded"
 		// and "a model is in the scene being rendered" are different claims.
-		RE::NiAVObject* g_attached = nullptr;
-		std::uint32_t   g_attaches = 0;
+		//
+		// THE MOD OWNS THIS NODE. It is loaded here with BSModelDB::Demand rather than borrowed
+		// from Inventory3DManager: that manager builds its model on a task the game only pumps
+		// while an inventory-family menu is open, so asking it from a settings page left
+		// loadedModels empty every time, with no warning and no picture (measured 2026-09-09,
+		// four runs). Loading the NIF ourselves has no such precondition.
+		RE::NiPointer<RE::NiNode> g_model;
+		RE::NiAVObject*           g_attached = nullptr;
+		std::uint32_t             g_attaches = 0;
+		std::string               g_modelPath;
+		std::string               g_lastError;
 
 		// The RAW override, used to calibrate the mapping: a driving tool sweeps these and the
 		// numbers that land the model inside the pane become the INI's mapping constants. Zero
@@ -78,6 +90,28 @@ namespace preview
 
 		void Apply();  // main thread only - defined below Show/Hide
 
+		// The NIF a form draws itself with. Weapons, armour pieces, books, ingredients and the rest
+		// all carry a TESModel; anything that does not (a spell, say) has no model to show and is
+		// declined rather than guessed at.
+		std::string ModelPathFor(RE::TESForm* a_form)
+		{
+			if (!a_form) { return {}; }
+			auto* model = a_form->As<RE::TESModel>();
+			if (!model) { return {}; }
+			const char* path = model->GetModel();
+			if (!path || !path[0]) { return {}; }
+
+			// The record stores the path relative to Meshes; the loader wants it from Data.
+			std::string full(path);
+			std::string lower = full;
+			for (char& c : lower) { c = static_cast<char>(std::tolower(static_cast<unsigned char>(c))); }
+			if (lower.rfind("meshes\\", 0) != 0 && lower.rfind("meshes/", 0) != 0)
+			{
+				full = "meshes\\" + full;
+			}
+			return full;
+		}
+
 		void Stop(RE::Inventory3DManager* a_mgr)
 		{
 			// The scene detach comes FIRST and happens whether or not the 3D manager is reachable:
@@ -88,6 +122,8 @@ namespace preview
 				if (auto* scene = RE::UI3DSceneManager::GetSingleton()) { scene->DetachChild(g_attached); }
 				g_attached = nullptr;
 			}
+			g_model.reset();
+			g_modelPath.clear();
 
 			if (!a_mgr) { return; }
 
@@ -150,8 +186,11 @@ namespace preview
 				return;
 			}
 
+			// The inventory 3D manager is no longer needed to LOAD anything - the mod owns that now -
+			// so a null one is not a reason to stop. It is still asked for, because the placement
+			// fields below are the ones the vanilla inventory reads and keeping them in step costs
+			// nothing; Stop() handles a null manager on its own.
 			auto* mgr = Manager();
-			if (!mgr) { return; }
 
 			// One read of the wish, under the lock, so the whole of this pass works from a single
 			// consistent snapshot rather than from values the render thread may change halfway.
@@ -171,33 +210,44 @@ namespace preview
 
 			if (wanted != g_loaded)
 			{
-				// A bound object is what the manager takes. Spells and other non-bound forms have no
-				// inventory model, so they are declined rather than pushed in and hoped for.
-				auto* bound = wanted->As<RE::TESBoundObject>();
-				if (!bound)
+				const std::string path = ModelPathFor(wanted);
+				if (path.empty())
 				{
-					if (g_loaded) { Stop(mgr); }
+					// Nothing to show, and that is a fact about the form rather than a failure -
+					// said once per form, at debug, and the wish is dropped so it is not retried
+					// every frame for the rest of the session.
+					logger::debug("preview: {:08X} \"{}\" has no model to show",
+								  wanted->GetFormID(), wanted->GetName());
+					g_lastError = "no model on this form";
+					Stop(mgr);
 					std::scoped_lock guard(g_lock);
 					g_requested = nullptr;
 					return;
 				}
 
-				if (!g_begun)
+				Stop(mgr);  // release whatever was showing before loading the next one
+
+				RE::NiPointer<RE::NiNode>            node;
+				RE::BSModelDB::DBTraits::ArgsType    args{};
+				const auto err = RE::BSModelDB::Demand(path.c_str(), node, args);
+				if (err != RE::BSResource::ErrorCode::kNone || !node)
 				{
-					mgr->Begin3D(RE::INTERFACE_LIGHT_SCHEME::kInventory);
-					g_begun = true;
-				}
-				else if (g_loaded)
-				{
-					mgr->UnloadInventoryItem();
-					g_loaded = nullptr;
+					++g_failures;
+					g_lastError = std::format("Demand failed ({}) for {}", static_cast<int>(err), path);
+					logger::warn("preview: {}", g_lastError);
+					std::scoped_lock guard(g_lock);
+					g_requested = nullptr;
+					return;
 				}
 
-				mgr->LoadInventoryItem(bound, nullptr);
+				g_model = node;
+				g_modelPath = path;
 				g_loaded = wanted;
+				g_lastError.clear();
 				++g_loads;
 
-				logger::debug("preview: showing {:08X} \"{}\"", g_loaded->GetFormID(), g_loaded->GetName());
+				logger::info("preview: loaded \"{}\" for {:08X} \"{}\"", path,
+							 g_loaded->GetFormID(), g_loaded->GetName());
 			}
 
 			// THE MODEL GOES INTO THE GAME'S OWN UI 3D SCENE, and the game draws it inside its own
@@ -208,9 +258,7 @@ namespace preview
 			// itself renders through, so attaching to it puts the work where the engine expects it.
 			if (auto* scene = RE::UI3DSceneManager::GetSingleton())
 			{
-				RE::NiAVObject* model = nullptr;
-				auto&           models = mgr->GetRuntimeData().loadedModels;
-				if (models.size() > 0) { model = models[models.size() - 1].spModel.get(); }
+				RE::NiAVObject* model = g_model.get();
 
 				if (model != g_attached)
 				{
@@ -253,10 +301,13 @@ namespace preview
 
 			if (scale > 0.0F)
 			{
-				mgr->itemPos = RE::NiPoint3(x, y, z);
-				mgr->itemPosCopy = mgr->itemPos;
-				mgr->itemScale = scale;
-				mgr->itemScaleCopy = scale;
+				if (mgr)
+				{
+					mgr->itemPos = RE::NiPoint3(x, y, z);
+					mgr->itemPosCopy = mgr->itemPos;
+					mgr->itemScale = scale;
+					mgr->itemScaleCopy = scale;
+				}
 
 				// Set on the OBJECT as well as on the manager. The manager applies its own copy during
 				// the Render() we no longer rely on, so with the attach path the object's own local
@@ -271,8 +322,10 @@ namespace preview
 			}
 			g_appliedX = x; g_appliedY = y; g_appliedZ = z; g_appliedScale = scale;
 
-			// Every frame while something is shown - this is what actually puts it on screen.
-			mgr->Render();
+			// Inventory3DManager::Render() used to be called here, on the belief that it was what
+			// put the item on screen. It is not, from this context: measured 2026-09-09, it draws
+			// nothing when called after the game's own render pass. What puts the model on screen
+			// is its membership of the UI 3D scene above, which the game renders inside that pass.
 		}
 	}
 
@@ -400,6 +453,46 @@ namespace preview
 
 	bool Available() { return RE::Inventory3DManager::GetSingleton() != nullptr; }
 
+	SceneState GetSceneState()
+	{
+		SceneState st;
+		auto* scene = RE::UI3DSceneManager::GetSingleton();
+		if (!scene) { return st; }
+
+		st.available = true;
+		st.cameraPresent = scene->camera != nullptr;
+		st.lightScheme = static_cast<std::uint32_t>(scene->currentlightScheme);
+		st.lightCount = static_cast<std::uint32_t>(scene->menuLights.size());
+		for (int i = 0; i < 8; ++i)
+		{
+			RE::NiNode* slot = scene->menuObjects[i].get();
+			if (!slot) { continue; }
+			++st.occupiedSlots;
+			if (g_attached && slot == g_attached) { st.ourSlot = i; }
+		}
+
+		// The same object seen through its other declaration, which is the one carrying the menu
+		// bookkeeping: which menu the scene is currently rendering for, and how many are registered.
+		auto* asRender = reinterpret_cast<RE::UIRenderManager*>(scene);
+		st.currentMenu = asRender->currentMenu;
+		st.menuIDCount = static_cast<std::uint32_t>(asRender->menuIDs.size());
+		return st;
+	}
+
+	void OpenGameInventory()
+	{
+		if (auto* tasks = SKSE::GetTaskInterface())
+		{
+			tasks->AddTask([]() {
+				if (auto* q = RE::UIMessageQueue::GetSingleton())
+				{
+					q->AddMessage(RE::InventoryMenu::MENU_NAME, RE::UI_MESSAGE_TYPE::kShow, nullptr);
+					logger::info("preview: asked the game to open its own inventory (comparison run)");
+				}
+			});
+		}
+	}
+
 	Status GetStatus()
 	{
 		Status s;
@@ -414,6 +507,8 @@ namespace preview
 		s.sceneAvailable = RE::UI3DSceneManager::GetSingleton() != nullptr;
 		s.attached = g_attached != nullptr;
 		s.attaches = g_attaches;
+		s.modelPath = g_modelPath;
+		s.lastError = g_lastError;
 		s.frameDrawn = g_frameDrawn;
 		return s;
 	}

@@ -15,6 +15,7 @@
 // inside it, and why the pane is meant to be placed clear of the framework's own window.
 
 #include <cstdint>
+#include <string>
 
 namespace RE
 {
@@ -84,7 +85,34 @@ namespace preview
 		bool          sceneAvailable = false;
 		bool          attached = false;
 		std::uint32_t attaches = 0;
+
+		// What the mod loaded, and why it did not - so a run says which of the two halves failed
+		// without a second launch to find out.
+		std::string   modelPath;
+		std::string   lastError;
 	};
 
 	[[nodiscard]] Status GetStatus();
+
+	// What the game's UI 3D scene currently holds, read straight off the object rather than
+	// inferred (rule 30). The comparison this exists for: read it while OUR page is showing an
+	// item, then again while the game's own inventory is showing one, and the difference is the
+	// precondition we are missing.
+	struct SceneState
+	{
+		bool          available = false;
+		bool          cameraPresent = false;
+		int           occupiedSlots = 0;
+		int           ourSlot = -1;
+		std::uint32_t lightScheme = 0;
+		std::uint32_t currentMenu = 0;
+		std::uint32_t menuIDCount = 0;
+		std::uint32_t lightCount = 0;
+	};
+
+	[[nodiscard]] SceneState GetSceneState();
+
+	// Ask the game to open its own inventory, so the line above can be read against a menu that
+	// genuinely renders the scene. Main-thread work, queued like everything else.
+	void OpenGameInventory();
 }
