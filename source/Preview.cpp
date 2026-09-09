@@ -240,6 +240,20 @@ namespace preview
 					return;
 				}
 
+				// PUSH THE LIGHT SCHEME. This is what actually makes the game render the UI 3D
+				// scene, and dropping it is why the model attached and stayed invisible. Measured
+				// 2026-09-09 by reading UI3DSceneManager in three contexts: idle it sits at scheme
+				// 4 with two on its stack; with the vanilla inventory open, and with Modex's menu
+				// open, it reads scheme 1 (kInventory) with three. Both of those draw. Begin3D is
+				// the call that pushes it - the manager is not needed to LOAD anything any more,
+				// but it still owns the scheme stack.
+				if (mgr && !g_begun)
+				{
+					mgr->Begin3D(RE::INTERFACE_LIGHT_SCHEME::kInventory);
+					g_begun = true;
+					logger::info("preview: pushed the kInventory light scheme onto the UI 3D scene");
+				}
+
 				g_model = node;
 				g_modelPath = path;
 				g_loaded = wanted;
@@ -479,15 +493,38 @@ namespace preview
 		return st;
 	}
 
-	void OpenGameInventory()
+	std::string OpenMenuFlags()
+	{
+		auto* ui = RE::UI::GetSingleton();
+		if (!ui) { return "[]"; }
+
+		std::string out = "[";
+		bool        first = true;
+		for (const auto& entry : ui->menuMap)
+		{
+			const auto& menu = entry.second.menu;
+			if (!menu) { continue; }
+			if (!first) { out += ','; }
+			first = false;
+			out += std::format(R"({{"name":"{}","offscreen":{},"flags":{}}})",
+							   entry.first.c_str(),
+							   menu->RendersOffscreenTargets() ? "true" : "false",
+							   static_cast<std::uint32_t>(menu->menuFlags.underlying()));
+		}
+		out += ']';
+		return out;
+	}
+
+	void OpenGameMenu(const std::string& a_menuName)
 	{
 		if (auto* tasks = SKSE::GetTaskInterface())
 		{
-			tasks->AddTask([]() {
+			const std::string name = a_menuName;
+			tasks->AddTask([name]() {
 				if (auto* q = RE::UIMessageQueue::GetSingleton())
 				{
-					q->AddMessage(RE::InventoryMenu::MENU_NAME, RE::UI_MESSAGE_TYPE::kShow, nullptr);
-					logger::info("preview: asked the game to open its own inventory (comparison run)");
+					q->AddMessage(RE::BSFixedString(name.c_str()), RE::UI_MESSAGE_TYPE::kShow, nullptr);
+					logger::info("preview: asked the game to open \"{}\" (comparison run)", name);
 				}
 			});
 		}

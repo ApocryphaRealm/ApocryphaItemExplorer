@@ -142,6 +142,12 @@ namespace DevBenchTool
 			// op=openinventory - open the game's OWN inventory, so uiscene can be read against a
 			//                    menu that genuinely renders that scene. The two together are the
 			//                    comparison: same object, one context that works and one that does not.
+			if (has("menuflags"))
+			{
+				a_write(a_sink, std::format(R"({{"ok":true,"op":"menuflags","menus":{}}})",
+											preview::OpenMenuFlags()).c_str());
+				return;
+			}
 			if (has("uiscene"))
 			{
 				const auto sc = preview::GetSceneState();
@@ -155,8 +161,20 @@ namespace DevBenchTool
 			}
 			if (has("openinventory"))
 			{
-				preview::OpenGameInventory();
+				preview::OpenGameMenu("InventoryMenu");
 				a_write(a_sink, R"({"ok":true,"op":"openinventory"})");
+				return;
+			}
+			// op=openmenu:<MenuName> - any of the game's menus by name. The question it answers:
+			// does the UI 3D scene need MENU MODE (a paused game), or specifically a menu that
+			// renders 3D? The journal pauses and shows no 3D, so it separates the two.
+			if (const auto at = args.find("openmenu:"); at != std::string_view::npos)
+			{
+				std::string name(args.substr(at + 9));
+				const auto end = name.find_first_of("\"},");
+				if (end != std::string::npos) { name = name.substr(0, end); }
+				preview::OpenGameMenu(name);
+				a_write(a_sink, std::format(R"({{"ok":true,"op":"openmenu","name":"{}"}})", EscapeJson(name)).c_str());
 				return;
 			}
 			if (has("previewstate"))

@@ -112,7 +112,14 @@ namespace preview
 
 	[[nodiscard]] SceneState GetSceneState();
 
-	// Ask the game to open its own inventory, so the line above can be read against a menu that
-	// genuinely renders the scene. Main-thread work, queued like everything else.
-	void OpenGameInventory();
+	// Every menu the game currently has open, with the flag that matters: kRendersOffscreenTargets
+	// is what gets a menu the offscreen 3D pass, and a menu carrying it is what made our attached
+	// model appear. This answers whether anything we can already open carries it, before writing a
+	// menu of our own to carry it.
+	[[nodiscard]] std::string OpenMenuFlags();
+
+	// Ask the game to open one of its own menus by name, so the scene can be read against a menu
+	// that genuinely renders it. Main-thread work, queued like everything else. This is a test
+	// hook for the driving tool, not something the page uses.
+	void OpenGameMenu(const std::string& a_menuName);
 }
