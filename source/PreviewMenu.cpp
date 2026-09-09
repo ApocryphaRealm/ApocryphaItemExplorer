@@ -9,6 +9,38 @@ namespace preview
 	namespace
 	{
 		bool g_registered = false;
+
+		// UI3DSceneManager::Render, Address Library ID 51855 on Skyrim SE 1.5.97.
+		//
+		// Hand-bound because CommonLibSSE does not carry it. The ID is version-specific and only
+		// the 1.5.97 one has been established, so this refuses to run on any other runtime rather
+		// than calling whatever happens to live at that address - a wrong address here is a crash,
+		// not a compile error (rule 44).
+		void RenderUIScene()
+		{
+			static const bool supported = [] {
+				const auto version = REL::Module::get().version();
+				const bool ok = version.major() == 1 && version.minor() == 5 && version.patch() == 97;
+				if (!ok)
+				{
+					logger::warn("preview menu: the UI 3D scene render is only mapped for Skyrim "
+								 "1.5.97; this runtime is {}, so the preview will not draw",
+								 version.string());
+				}
+				return ok;
+			}();
+			if (!supported) { return; }
+
+			auto* scene = RE::UI3DSceneManager::GetSingleton();
+			if (!scene) { return; }
+
+			using func_t = void (*)(RE::UI3DSceneManager*, RE::INTERFACE_LIGHT_SCHEME, RE::NiCamera*, bool);
+			static REL::Relocation<func_t> render{ REL::ID(51855) };
+
+			// A null camera makes the function use the scene's own, which is the one our page has
+			// been positioning all along.
+			render(scene, RE::INTERFACE_LIGHT_SCHEME::kInventory, nullptr, false);
+		}
 	}
 
 	PreviewMenu::PreviewMenu()
@@ -58,11 +90,20 @@ namespace preview
 			logger::info("preview menu: PreDisplay fired - the game IS rendering this menu");
 		}
 
-		// THE DRAW, in the one place it belongs. This is inside the game's own render pass, on a
-		// menu the game is rendering - which is what every earlier attempt lacked. The same call
-		// from the framework's Present hook drew nothing, and from a main-thread task drew
-		// nothing, because neither is a render pass.
-		if (auto* mgr = RE::Inventory3DManager::GetSingleton()) { mgr->Render(); }
+		// THE DRAW, in the one place it belongs: inside the game's own render pass, on a menu the
+		// game is rendering. Every earlier attempt lacked that - the same idea from the framework's
+		// Present hook drew nothing, and from a main-thread task drew nothing, because neither is
+		// a render pass.
+		//
+		// UI3DSceneManager's RENDER is the call, and CommonLibSSE does not bind it - it binds six
+		// methods of that class and this is not one of them. It was identified by dumping the
+		// class's code block out of the running game (the on-disk exe is Steam-packed) and reading
+		// it: of the fifteen functions in the block, exactly one touches both shader accumulators,
+		// the camera, the lights, the shadow scene node and the lock, across 366 instructions and
+		// 40 calls. Its prologue gives the signature - rcx this, edx compared against
+		// currentlightScheme at +0x90, r8 a camera pointer that falls back to this->camera when
+		// null, r9b a flag - so it is called here with the scene's own camera.
+		RenderUIScene();
 	}
 
 	void RegisterPreviewMenu()

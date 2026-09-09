@@ -142,6 +142,23 @@ namespace DevBenchTool
 			// op=openinventory - open the game's OWN inventory, so uiscene can be read against a
 			//                    menu that genuinely renders that scene. The two together are the
 			//                    comparison: same object, one context that works and one that does not.
+			// op=scanmenu - the game's InventoryMenu::PreDisplay, and everything it calls.
+			// op=dump:<hex offset>:<length> - raw bytes from the running module, for disassembly.
+			if (const auto at = args.find("dump:"); at != std::string_view::npos)
+			{
+				std::uintptr_t off = 0;
+				unsigned       len = 0x100;
+                std::sscanf(std::string(args.substr(at + 5, 40)).c_str(), "%llx:%u", &off, &len);
+				a_write(a_sink, std::format(R"({{"ok":true,"op":"dump","dump":{}}})",
+											preview::DumpBytes(off, len)).c_str());
+				return;
+			}
+			if (has("scanmenu"))
+			{
+				a_write(a_sink, std::format(R"({{"ok":true,"op":"scanmenu","scan":{}}})",
+											preview::ScanInventoryPreDisplay()).c_str());
+				return;
+			}
 			if (has("menuflags"))
 			{
 				a_write(a_sink, std::format(R"({{"ok":true,"op":"menuflags","menus":{}}})",

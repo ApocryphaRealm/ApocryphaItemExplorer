@@ -1,4 +1,4 @@
-#include "PCH.h"
+﻿#include "PCH.h"
 
 #include "Preview.h"
 
@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstring>
 #include <format>
 #include <mutex>
 #include <string>
@@ -534,6 +535,66 @@ namespace preview
 		return out;
 	}
 
+	std::string ScanInventoryPreDisplay()
+	{
+		const auto base = REL::Module::get().base();
+
+		// The vtable of the one menu that is known to render the scene.
+		const REL::Relocation<std::uintptr_t> vtable{ RE::VTABLE_InventoryMenu[0] };
+		const auto* slots = reinterpret_cast<const std::uintptr_t*>(vtable.address());
+		if (!slots) { return R"({"error":"no vtable"})"; }
+
+		// Every UI3DSceneManager method sits in one tight block on 1.5.97: AttachChild is at
+		// +0x8D33B0 and SetCameraFOV at +0x8D39E0, with the class's other methods either side.
+		// A call from this menu into that block is a call into the scene manager, whichever
+		// method it turns out to be - so the search is for the block, not for a known function.
+		constexpr std::uintptr_t kSceneLo = 0x8D1000;
+		constexpr std::uintptr_t kSceneHi = 0x8D5000;
+
+		std::string out = std::format(R"({{"base":"0x{:X}","vtable":"0x{:X}","hits":[)",
+									  base, vtable.address() - base);
+		bool first = true;
+
+		// Every slot in the menu's vtable, not just PreDisplay - PreDisplay turned out to call
+		// nothing in the block, and guessing a second slot would be another launch per guess.
+		for (int slot = 0; slot < 32; ++slot)
+		{
+			const std::uintptr_t fn = slots[slot];
+			if (fn < base || fn > base + 0x2000000) { continue; }
+
+			const auto* code = reinterpret_cast<const std::uint8_t*>(fn);
+			for (std::size_t i = 0; i + 5 < 0x600; ++i)
+			{
+				if (code[i] != 0xE8) { continue; }
+				std::int32_t rel = 0;
+				std::memcpy(&rel, code + i + 1, sizeof(rel));
+				const std::uintptr_t target = fn + i + 5 + rel;
+				if (target < base) { continue; }
+				const std::uintptr_t off = target - base;
+				if (off < kSceneLo || off >= kSceneHi) { continue; }
+				if (!first) { out += ','; }
+				first = false;
+				out += std::format(R"({{"slot":{},"fn":"0x{:X}","at":{},"target":"0x{:X}"}})",
+								   slot, fn - base, i, off);
+			}
+		}
+		out += "]}";
+		return out;
+	}
+
+	std::string DumpBytes(std::uintptr_t a_offset, std::size_t a_length)
+	{
+		const auto base = REL::Module::get().base();
+		const auto length = std::min<std::size_t>(a_length, 0x800);
+		if (a_offset == 0 || a_offset > 0x2000000) { return R"({"error":"offset out of range"})"; }
+
+		const auto* p = reinterpret_cast<const std::uint8_t*>(base + a_offset);
+		std::string hex;
+		hex.reserve(length * 2);
+		for (std::size_t i = 0; i < length; ++i) { hex += std::format("{:02X}", p[i]); }
+		return std::format(R"({{"offset":"0x{:X}","length":{},"bytes":"{}"}})", a_offset, length, hex);
+	}
+
 	void OpenGameMenu(const std::string& a_menuName)
 	{
 		if (auto* tasks = SKSE::GetTaskInterface())
@@ -574,3 +635,4 @@ namespace preview
 		return s;
 	}
 }
+

@@ -120,6 +120,20 @@ namespace preview
 	// menu of our own to carry it.
 	[[nodiscard]] std::string OpenMenuFlags();
 
+	// Read the game's own InventoryMenu::PreDisplay and report every function it calls, as offsets
+	// from the module base. That menu is the only context in which our model has ever been drawn,
+	// so whatever renders the UI 3D scene is among these - and the offsets map back to Address
+	// Library IDs, which is how the answer becomes something we can call.
+	//
+	// Read-only, and it reads the RUNNING process on purpose: the on-disk SkyrimSE.exe is
+	// Steam-packed, so the same bytes cannot be found by disassembling the file (PREFLIGHT).
+	[[nodiscard]] std::string ScanInventoryPreDisplay();
+
+	// Hand back raw bytes from the running module, as hex, for disassembly outside the game.
+	// The on-disk exe is Steam-packed, so this is the only place those bytes exist (PREFLIGHT).
+	// Read-only, bounded, and a test hook - nothing the page uses.
+	[[nodiscard]] std::string DumpBytes(std::uintptr_t a_offset, std::size_t a_length);
+
 	// Ask the game to open one of its own menus by name, so the scene can be read against a menu
 	// that genuinely renders it. Main-thread work, queued like everything else. This is a test
 	// hook for the driving tool, not something the page uses.
