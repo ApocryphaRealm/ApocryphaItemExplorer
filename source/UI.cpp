@@ -6,7 +6,6 @@
 
 #include "Catalog.h"
 #include "Favourites.h"
-#include "Preview.h"
 #include "Settings.h"
 
 #include "utils/Logger.h"
@@ -51,6 +50,52 @@ namespace UI
 		char        g_itemSearch[128] = {};
 		int         g_selectedPlugin = -1;
 		int         g_addCount = 1;
+		// Gold gets its own amount because its sane range is nothing like anything else's: you ask
+		// for 5 potions and 5000 septims. One slider covering both would have useless precision at
+		// the low end, so the special case lives on the one row it applies to (the owner, 2026-09-10:
+		// "up to 50 for consumables and 10000 for gold").
+		int         g_goldCount = 100;
+
+		constexpr int kStackMax = 50;      // consumables AND crafting materials
+		constexpr int kGoldMax  = 10000;
+
+		// Gold001. Matched by form id because gold carries no keyword of its own that separates it
+		// from ordinary clutter - it is VendorItemClutter, same as a tin cup.
+		constexpr RE::FormID kGoldFormID = 0x0000000F;
+
+		// "Consumable" here follows the owner's own widening (2026-09-10): things you hold a pile of.
+		// Potions, ingredients, scrolls, ammo and soul gems by kind - and CRAFTING MATERIALS, which
+		// are Misc records and so cannot be told apart by kind alone. They are identified by the
+		// vanilla vendor keywords instead, read off the form rather than guessed from its name:
+		// VendorItemOreIngot covers ingots and ore, VendorItemAnimalHide covers leather and strips.
+		bool IsBulkItem(const Catalog::Item& a_item)
+		{
+			switch (a_item.kind)
+			{
+			case Catalog::Kind::kPotion:
+			case Catalog::Kind::kIngredient:
+			case Catalog::Kind::kScroll:
+			case Catalog::Kind::kAmmo:
+			case Catalog::Kind::kSoulGem:
+				return true;
+			default:
+				break;
+			}
+			if (const auto* kwf = a_item.form ? a_item.form->As<RE::BGSKeywordForm>() : nullptr)
+			{
+				for (const char* kw : { "VendorItemOreIngot", "VendorItemAnimalHide",
+										"VendorItemFirewood", "VendorItemGem" })
+				{
+					if (kwf->HasKeywordString(kw)) { return true; }
+				}
+			}
+			return false;
+		}
+
+		[[nodiscard]] bool IsGold(const Catalog::Item& a_item)
+		{
+			return a_item.formID == kGoldFormID;
+		}
 		bool        g_searchEverywhere = false;
 		// Skyrim ships hundreds of enchanted variants of every base weapon and armour piece,
 		// and they bury what a plugin actually adds. Off by default for that reason.
@@ -59,17 +104,6 @@ namespace UI
 		bool        g_kindInit = false;
 		std::string g_status;
 
-		// What the 3D preview is following. A raw pointer into the catalogue, which lives as long
-		// as the catalogue does; cleared whenever the catalogue is rebuilt.
-		RE::TESForm* g_selectedForm = nullptr;
-	}
-
-	// Exposed for the DevBench tool (rule 64). Selecting a row is normally a click, and a click is
-	// exactly what a headless test cannot do - which is how the 3D preview reached a release
-	// without anyone having seen it draw.
-	void SelectForPreview(RE::TESForm* a_form)
-	{
-		g_selectedForm = a_form;
 	}
 
 	namespace
@@ -175,34 +209,6 @@ namespace UI
 			ImGuiMCP::TextDisabled("%s", strings::TR("AIE_QuestHint",
 								   "items a quest calls its own - always tagged [quest] when shown"));
 
-			ImGuiMCP::Toggle(strings::TR("AIE_Show3D", "Show the selected item in 3D"),
-							 &settings::general::show3DPreview);
-
-			if (settings::general::show3DPreview)
-			{
-				// Where the model appears. It has to be movable, and it has to be movable to
-				// somewhere this window is not: the model is drawn by the game earlier in the
-				// frame than this menu is composited, so wherever the two overlap, the menu wins
-				// and the model is behind it.
-				ImGuiMCP::TextDisabled("%s", strings::TR("AIE_PreviewWhere",
-									   "the model is drawn behind this window - put its pane somewhere clear of it"));
-
-				float cx = settings::preview::paneX;
-				float cy = settings::preview::paneY;
-				float size = settings::preview::paneSize;
-				bool  moved = false;
-
-				ImGuiMCP::PushItemWidth(220.0F);
-				moved |= ImGuiMCP::SliderFloat(strings::TR("AIE_PreviewX", "Pane across"), &cx, 0.05F, 0.95F, "%.2f", 0);
-				moved |= ImGuiMCP::SliderFloat(strings::TR("AIE_PreviewY", "Pane down"), &cy, 0.05F, 0.95F, "%.2f", 0);
-				moved |= ImGuiMCP::SliderFloat(strings::TR("AIE_PreviewSize", "Pane size"), &size, 0.08F, 0.90F, "%.2f", 0);
-				ImGuiMCP::PopItemWidth();
-				if (moved) { preview::SetPane(cx, cy, size); }
-
-				ImGuiMCP::Toggle(strings::TR("AIE_PreviewFrame", "Mark the pane with corners and a caption"),
-								 &settings::preview::showFrame);
-			}
-
 			ImGuiMCP::Spacing();
 			if (ImGuiMCP::Button(strings::TR("AIE_All", "All")))
 			{
@@ -224,13 +230,33 @@ namespace UI
 			const std::string id = std::to_string(a_item.formID);
 			ImGuiMCP::PushID(id.c_str());
 
+			// How many this row will actually hand over. Gold uses its own amount; a consumable or
+			// crafting material uses the slider; anything else is a single item, because fifty
+			// cuirasses is never what was meant.
+			const bool  gold    = IsGold(a_item);
+			const bool  bulk    = IsBulkItem(a_item);
+			const int   rowMax  = gold ? kGoldMax : (bulk ? kStackMax : 1);
+			const int   rowWant = gold ? g_goldCount : (bulk ? g_addCount : 1);
+
 			if (ImGuiMCP::Button(strings::TR("AIE_Add", "Add")))
 			{
-				const auto count = static_cast<std::uint32_t>(g_addCount < 1 ? 1 : g_addCount);
+				const auto count = static_cast<std::uint32_t>(std::clamp(rowWant, 1, rowMax));
 				Catalog::GiveToPlayer(a_item.form, count);
 				g_status = std::string(strings::TR("AIE_Added", "Added")) + " " +
 						   std::to_string(count) + " x " +
 						   (a_item.name.empty() ? a_item.editorID : a_item.name);
+			}
+
+			// Gold's own amount, shown only on the gold row so the wide range never gets in the way
+			// of ordinary items.
+			if (gold)
+			{
+				ImGuiMCP::SameLine();
+				ImGuiMCP::PushItemWidth(220.0F);
+				ImGuiMCP::SliderInt("##goldamount", &g_goldCount, 1, kGoldMax);
+				ImGuiMCP::PopItemWidth();
+				if (g_goldCount < 1) { g_goldCount = 1; }
+				if (g_goldCount > kGoldMax) { g_goldCount = kGoldMax; }
 			}
 
 			// The favourite toggle. A filled star means it is on the Favourites page; the label is
@@ -250,9 +276,6 @@ namespace UI
 			ImGuiMCP::SameLine();
 			ImGuiMCP::Text("%s", a_item.name.empty() ? a_item.editorID.c_str() : a_item.name.c_str());
 
-			// Selecting a row is what the 3D preview follows. Clicking the NAME rather than adding
-			// a button keeps the row the same width it was.
-			if (ImGuiMCP::IsItemClicked()) { g_selectedForm = a_item.form; }
 
 			// A quest item is called out wherever it appears, whether or not they are being hidden -
 			// handing yourself one can confuse the quest that owns it, and that is worth knowing
@@ -341,9 +364,13 @@ namespace UI
 
 		ImGuiMCP::Spacing();
 		ImGuiMCP::PushItemWidth(220.0F);
-		ImGuiMCP::InputInt(strings::TR("AIE_HowMany", "How many"), &g_addCount);
+		// A slider rather than a typed number: the useful range is small and bounded, and a
+		// slider cannot be left holding a half-typed value. Gold is not covered here - it has
+		// its own control on its own row.
+		ImGuiMCP::SliderInt(strings::TR("AIE_HowMany", "How many"), &g_addCount, 1, kStackMax);
 		ImGuiMCP::PopItemWidth();
 		if (g_addCount < 1) { g_addCount = 1; }
+		if (g_addCount > kStackMax) { g_addCount = kStackMax; }
 		ImGuiMCP::SameLine();
 		ImGuiMCP::Toggle(strings::TR("AIE_SearchEverywhere", "Search every plugin"), &g_searchEverywhere);
 		ImGuiMCP::Toggle(strings::TR("AIE_ShowEnchanted", "Show enchanted variants"), &g_showEnchanted);
@@ -463,12 +490,6 @@ namespace UI
 			ImGuiMCP::TextDisabled("%s", g_status.c_str());
 		}
 
-		// The 3D preview follows whatever row was last clicked. Both calls belong at the end of the
-		// frame's drawing: Show only records the wish, Tick is what actually talks to the game's
-		// inventory renderer, and it has to happen on the frame it is drawn.
-		preview::Show(g_selectedForm);
-		preview::Tick();
-		preview::DrawFrame();
 	}
 
 	// The favourites page. Deliberately a SECOND page rather than a filter on the first: the whole
@@ -506,7 +527,6 @@ namespace UI
 		if (ImGuiMCP::Button(strings::TR("AIE_FavClear", "Clear all")))
 		{
 			favourites::Clear();
-			g_selectedForm = nullptr;
 			return;
 		}
 
@@ -544,8 +564,5 @@ namespace UI
             ImGuiMCP::TextDisabled("%s", g_status.c_str());
         }
 
-		preview::Show(g_selectedForm);
-		preview::Tick();
-		preview::DrawFrame();
 	}
 }

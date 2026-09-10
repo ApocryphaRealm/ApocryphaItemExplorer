@@ -97,74 +97,6 @@ namespace DevBenchTool
 
 			// op=preview:<hex form id> - point the 3D preview at a form with no mouse click.
 			// op=pane:cx,cy,size       - move the pane the model is placed inside, in screen fractions.
-			// op=place:x,y,z,scale     - the RAW placement override, in the 3D manager's own units,
-			//                            which is how the pane-to-model mapping is calibrated; a scale
-			//                            of 0 clears the override and hands placement back to the pane.
-			// op=previewstate          - what is shown, where the pane is in pixels, and what was last
-			//                            handed to the 3D manager.
-			//
-			// These sat INSIDE the find: branch until 2026-09-09, so they only answered when the
-			// arguments also contained "find:" - which is why nothing had ever driven the preview.
-			// op=config:<recipe>,<loadMode>,<marker> - the whole point of this build. The menu's
-			// flags and its movie are fixed at construction, so a configuration is a NEW menu; this
-			// sets the three knobs and closes the menu so the next preview rebuilds it. That turns
-			// what used to cost one game launch per guess into one launch for the whole sweep.
-			if (const auto at = args.find("config:"); at != std::string_view::npos)
-			{
-				unsigned recipe = settings::preview::menuRecipe;
-				unsigned load = settings::preview::loadMode;
-				unsigned marker = settings::preview::markerMovie ? 1u : 0u;
-				std::sscanf(std::string(args.substr(at + 7, 32)).c_str(), "%u,%u,%u",
-							&recipe, &load, &marker);
-				settings::preview::menuRecipe = recipe;
-				settings::preview::loadMode = load;
-				settings::preview::markerMovie = marker != 0;
-				preview::RebuildMenu();
-				a_write(a_sink, std::format(
-					R"({{"ok":true,"op":"config","recipe":{},"loadMode":{},"markerMovie":{}}})",
-					recipe, load, marker != 0 ? "true" : "false").c_str());
-				return;
-			}
-			if (const auto at = args.find("preview:"); at != std::string_view::npos)
-			{
-				const std::string idText(args.substr(at + 8, 8));
-				RE::FormID id = 0;
-				try { id = static_cast<RE::FormID>(std::stoul(idText, nullptr, 16)); } catch (...) {}
-				RE::TESForm* form = id ? RE::TESForm::LookupByID(id) : nullptr;
-				UI::SelectForPreview(form);
-				a_write(a_sink, std::format(R"({{"ok":{},"op":"preview","formID":"0x{:08X}"}})",
-											form ? "true" : "false", id).c_str());
-				return;
-			}
-			if (const auto at = args.find("pane:"); at != std::string_view::npos)
-			{
-				float cx = 0, cy = 0, size = 0;
-				std::sscanf(std::string(args.substr(at + 5, 48)).c_str(), "%f,%f,%f", &cx, &cy, &size);
-				preview::SetPane(cx, cy, size);
-				float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
-				const bool known = preview::GetPaneRect(x0, y0, x1, y1);
-				a_write(a_sink, std::format(
-					R"({{"ok":true,"op":"pane","cx":{:.3f},"cy":{:.3f},"size":{:.3f},"rectKnown":{},)"
-					R"("x0":{:.0f},"y0":{:.0f},"x1":{:.0f},"y1":{:.0f}}})",
-					settings::preview::paneX, settings::preview::paneY, settings::preview::paneSize,
-					known ? "true" : "false", x0, y0, x1, y1).c_str());
-				return;
-			}
-			if (const auto at = args.find("place:"); at != std::string_view::npos)
-			{
-				float x = 0, y = 0, z = 0, sc = 0;
-				std::sscanf(std::string(args.substr(at + 6, 48)).c_str(), "%f,%f,%f,%f", &x, &y, &z, &sc);
-				preview::SetPlacement(x, y, z, sc);
-				a_write(a_sink, std::format(R"({{"ok":true,"op":"place","x":{:.1f},"y":{:.1f},"z":{:.1f},"scale":{:.3f}}})",
-											x, y, z, sc).c_str());
-				return;
-			}
-			// op=uiscene       - what the game's UI 3D scene holds right now.
-			// op=openinventory - open the game's OWN inventory, so uiscene can be read against a
-			//                    menu that genuinely renders that scene. The two together are the
-			//                    comparison: same object, one context that works and one that does not.
-			// op=scanmenu - the game's InventoryMenu::PreDisplay, and everything it calls.
-			// op=xrefs:<hex offset> - every direct call site of that function, module-wide.
 			if (const auto at = args.find("xrefs:"); at != std::string_view::npos)
 			{
 				std::uintptr_t off = 0;
@@ -246,42 +178,6 @@ namespace DevBenchTool
 				a_write(a_sink, std::format(R"({{"ok":true,"op":"openmenu","name":"{}"}})", EscapeJson(name)).c_str());
 				return;
 			}
-			// op=scheme:<0-7> - the light scheme the model is attached under and rendered with.
-			// Changing it re-attaches, so one launch can try every scheme.
-			if (const auto at = args.find("scheme:"); at != std::string_view::npos)
-			{
-				unsigned v = 1;
-                std::sscanf(std::string(args.substr(at + 7, 8)).c_str(), "%u", &v);
-				if (v > 7) { v = 1; }
-				settings::preview::scheme = v;
-				preview::Hide();
-				a_write(a_sink, std::format(R"({{"ok":true,"op":"scheme","scheme":{}}})", v).c_str());
-				return;
-			}
-			if (has("previewstate"))
-			{
-				const auto st = preview::GetStatus();
-				a_write(a_sink, std::format(
-					R"({{"ok":true,"op":"previewstate","available":{},"showing":{},"formID":"0x{:08X}",)"
-					R"("loads":{},"frameDrawn":{},"rawOverride":{},)"
-					R"("sceneAvailable":{},"attached":{},"hasParent":{},"rootChildren":{},"paused":{},"pauseClaims":{},"attaches":{},"failures":{},)"
-					R"("menuOpen":{},"managerModels":{},"managerScheme":{},"modelPath":"{}","lastError":"{}",)"
-					R"("pane":{{"cx":{:.3f},"cy":{:.3f},"size":{:.3f},"x0":{:.0f},"y0":{:.0f},"x1":{:.0f},"y1":{:.0f}}},)"
-					R"("applied":{{"x":{:.2f},"y":{:.2f},"z":{:.2f},"scale":{:.3f}}}}})",
-					st.available ? "true" : "false", st.showing ? "true" : "false", st.currentFormID,
-					st.loads, st.frameDrawn ? "true" : "false", st.rawOverride ? "true" : "false",
-					st.sceneAvailable ? "true" : "false", st.attached ? "true" : "false",
-					st.hasParent ? "true" : "false", st.schemeRootChildren,
-					st.gamePaused ? "true" : "false", st.pauseClaims, st.attaches, st.failures,
-					st.menuOpen ? "true" : "false", st.managerModels, st.managerScheme, EscapeJson(st.modelPath), EscapeJson(st.lastError),
-					settings::preview::paneX, settings::preview::paneY, settings::preview::paneSize,
-					st.paneX0, st.paneY0, st.paneX1, st.paneY1,
-					st.posX, st.posY, st.posZ, st.scale).c_str());
-				return;
-			}
-
-			// op=find:<text> - search every plugin at once, capped so a broad term cannot flood
-			// the reply.
 			if (has("find:") || has("findall:"))
 			{
 				EnsureBuilt();
