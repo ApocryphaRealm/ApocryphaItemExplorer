@@ -1,4 +1,4 @@
-// ApocryphaRealm Item Explorer - own code, MIT (2026-09-08).
+// ApocryphaRealm Item Explorer - own code, GPL-3.0-or-later (2026-09-08).
 //
 // Browse every plugin the game loaded, see the items each one adds, and take any of them. It is
 // built from scratch on the Apocrypha Menu Framework, with AddItemMenu - Ultimate Mod Explorer by
