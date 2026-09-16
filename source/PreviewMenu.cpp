@@ -120,8 +120,8 @@ namespace preview
 		// it does not, nothing about the 3D has been tested yet. Both movies are ours, generated
 		// by .MD/scripts/make-marker-swf.py and make-blank-swf.py - no vanilla SWF is loaded by
 		// path and no other mod's file is reused.
-		const char* movie = settings::preview::markerMovie ? "ApocryphaItemExplorer/preview_marker"
-														   : "ApocryphaItemExplorer/preview";
+		const char* movie = settings::preview::markerMovie ? "ItemExplorer/preview_marker"
+														   : "ItemExplorer/preview";
 		if (auto* scaleform = RE::BSScaleformManager::GetSingleton())
 		{
 			const bool loaded = scaleform->LoadMovieEx(

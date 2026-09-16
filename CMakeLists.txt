@@ -1,7 +1,7 @@
 ﻿cmake_minimum_required(VERSION 3.21)
 
 project(
-	ApocryphaItemExplorer
+	ItemExplorer
 	VERSION 1.0.5
 	LANGUAGES CXX
 )

@@ -24,8 +24,8 @@ namespace favourites
 				// Beside the log. A mod folder is not reliably writable under a mod manager, and
 				// this is the one directory the plugin already knows it can write to.
 				auto dir = SKSE::log::log_directory();
-				g_path = dir ? (*dir / "ApocryphaItemExplorer_favourites.txt").string()
-							 : std::string("ApocryphaItemExplorer_favourites.txt");
+				g_path = dir ? (*dir / "ItemExplorer_favourites.txt").string()
+							 : std::string("ItemExplorer_favourites.txt");
 			}
 			return g_path;
 		}

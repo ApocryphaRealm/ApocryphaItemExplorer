@@ -31,7 +31,7 @@ namespace
 			break;
 
 		case SKSE::MessagingInterface::kDataLoaded:
-			strings::Configure("ApocryphaItemExplorer");
+			strings::Configure("ItemExplorer");
 			favourites::Resolve();
 			UI::Register();
 			preview::RegisterPreviewMenu();
@@ -51,9 +51,9 @@ namespace
 SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 {
 	SKSE::Init(a_skse);
-	SKSE::log::init("ApocryphaItemExplorer");
+	SKSE::log::init("ItemExplorer");
 
-	settings::Init("ApocryphaItemExplorer.ini");
+	settings::Init("ItemExplorer.ini");
 	settings::ApplyLogLevel();
 
 	favourites::Load();
