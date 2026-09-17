@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.6 - 2026-09-16 - untested
+
+### Changed
+- The DLL, its INI and its log lose the Apocrypha prefix - ItemExplorer.dll, ItemExplorer.ini, ItemExplorer.log. Your existing ApocryphaItemExplorer.ini is no longer read, so settings return to defaults; copy your values across if you had changed any.
+
 ## 1.0.4 - 2026-09-10 - working
 
 ### Changed
