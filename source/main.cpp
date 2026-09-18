@@ -51,17 +51,18 @@ namespace
 
 SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 {
-	SKSE::Init(a_skse);
 	SKSE::log::init("ItemExplorer");
 
 	// 1.0.7: before anything resolves an address, say which Address Library file this game needs and whether it
 	// is there; when it is missing the plugin loads inert with a message that names the file (the guard every
 	// mod of ours carries since Wheeler 1.2.9).
+
+	// The guard runs BEFORE SKSE::Init: CommonLibSSE-NG's Init opens the Address Library itself, so a guard placed after it never ran when the file was missing (oproso's wheeler.log, 2026-09-18 - banner, then the bare failure, no [AddressLibrary] line).
 	if (!AddressLibraryGuard::Guard("Item Explorer"))
 	{
 		return true;
 	}
-
+	SKSE::Init(a_skse);
 	settings::Init("ItemExplorer.ini");
 	settings::ApplyLogLevel();
 

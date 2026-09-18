@@ -1,6 +1,11 @@
 # Changelog
 
-## 1.0.9 - 2026-09-18 - untested
+## 1.1.0 - 2026-09-18 - untested
+
+### Fixed
+- **The Address Library guard now runs before SKSE::Init.** CommonLibSSE-NG's Init opens the Address Library itself, so the guard added for a missing file sat after the very call that fails on it and never ran; oproso's log (Perfected Wheeler 1.3.2, 2026-09-18) showed the banner, then CommonLib's bare 'failed to open address library file', and no [AddressLibrary] line. The check is now the first thing after the logger, so a missing file is named - game version, file, folder - and the plugin loads inert.
+
+## 1.0.9 - 2026-09-18 - working
 
 ### Fixed
 - **Searching "gold" finds gold even when a mod has renamed it** (the owner, 2026-09-18: *"its called septims"*). SE keeps no editor id in memory for most forms, so a renamed engine item had nothing but its new name to match; Gold001, Lockpick and SkeletonKey now carry their editor ids in the catalogue.
