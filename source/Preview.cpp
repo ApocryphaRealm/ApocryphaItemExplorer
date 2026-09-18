@@ -266,7 +266,10 @@ namespace preview
 		if (!Available()) { caption = strings::TR("AIE_PreviewUnavailable", "The 3D preview is not available on this runtime."); captionCol = kDim; }
 		else if (a_title && a_title[0]) { caption = a_title; }
 		else { caption = strings::TR("AIE_PreviewPickARow", "Point at an item to see it here."); captionCol = kDim; }
-		ImGuiMCP::ImDrawListManager::AddText(dl, ImGuiMCP::ImVec2{ x0 + 10.0F, y0 + 8.0F }, captionCol, caption, nullptr);
+		// Centred across the box (the owner, 2026-09-18: "make the text centered in the 3D render box").
+		const ImGuiMCP::ImVec2 textSize = ImGuiMCP::CalcTextSize(caption, nullptr, false, -1.0F);
+		const float textX = (std::max)(x0 + 6.0F, (x0 + x1) * 0.5F - textSize.x * 0.5F);
+		ImGuiMCP::ImDrawListManager::AddText(dl, ImGuiMCP::ImVec2{ textX, y0 + 8.0F }, captionCol, caption, nullptr);
 	}
 
 	bool MenuShouldClose()

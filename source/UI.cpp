@@ -153,7 +153,7 @@ namespace UI
 			"igSliderFloat", "igCombo_Str_arr",
 			// 1.0.7: the 3D preview pane is an image of the engine's own render, and the row under
 			// the cursor OR under D-pad focus is what it shows.
-			"igIsItemFocused", "ImDrawList_AddImage"
+			"igIsItemFocused", "ImDrawList_AddImage", "igCalcTextSize"
 		};
 
 		bool HasRequiredExports()

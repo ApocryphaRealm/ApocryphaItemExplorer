@@ -4,6 +4,7 @@
 
 ### Changed
 - The preview box's frame is the Apocrypha Menu Framework's own theme frame - the Skyrim theme's Nordic knotwork, drawn just outside the box the way the framework frames its window - through the framework's new `AMF_DrawThemeFrame` export (1.8.9). On an older framework, or a theme without a frame, the box keeps its plain white line.
+- The item's name is centred across the top of the box.
 
 ## 1.0.7 - 2026-09-18 - working
 
