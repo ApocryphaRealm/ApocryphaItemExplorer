@@ -77,6 +77,13 @@ namespace Catalog
 				if (!form) { continue; }
 
 				const RE::TESFile* file = OwningFile(form);
+				// Engine-defined forms (form ids below 0x800: Gold001 0xF, Lockpick 0xA, the arrows and
+				// skeleton keys) are created before any plugin is read, so GetFile(0) is null for them
+				// although Skyrim.esm defines them; they used to be skipped (looked into when the owner,
+				// 2026-09-18, at first could not find Gold: "i cant find gold in item explorer after searching
+				// every plugin" - Gold itself turned out to be listed). They
+				// belong to Skyrim.esm.
+				if (!file && form->GetFormID() < 0x800) { file = handler->LookupModByName("Skyrim.esm"); }
 				if (!file) { continue; }
 
 				// A file name that is empty or absurd means the pointer is not really a TESFile;
@@ -94,6 +101,19 @@ namespace Catalog
 
 				const char* edid = form->GetFormEditorID();
 				item.editorID = (edid && edid[0]) ? edid : "";
+				// SE keeps no editor id in memory for most forms, so a renamed engine item cannot be found by
+				// its original name: with a mod calling gold "Septims", searching "gold" found nothing (the
+				// owner, 2026-09-18: "its called septims"). The engine-defined items get their known ids.
+				if (item.editorID.empty())
+				{
+					switch (item.formID)
+					{
+					case 0x0000000A: item.editorID = "Lockpick"; break;
+					case 0x0000000B: item.editorID = "SkeletonKey"; break;
+					case 0x0000000F: item.editorID = "Gold001"; break;
+					default: break;
+					}
+				}
 
 				// A form with neither a name nor an editor ID is not something a player can pick
 				// out of a list, so it is skipped rather than shown blank.

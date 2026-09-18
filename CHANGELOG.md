@@ -2,6 +2,10 @@
 
 ## 1.0.9 - 2026-09-18 - untested
 
+### Fixed
+- **Searching "gold" finds gold even when a mod has renamed it** (the owner, 2026-09-18: *"its called septims"*). SE keeps no editor id in memory for most forms, so a renamed engine item had nothing but its new name to match; Gold001, Lockpick and SkeletonKey now carry their editor ids in the catalogue.
+- **An engine-defined form with no source file is listed under Skyrim.esm instead of being skipped.** Looked into after the owner could not find Gold at first (2026-09-18: *"i cant find gold in item explorer after searching every plugin"* - he then found it, so Gold itself was never dropped); the catalogue used to skip any form whose GetFile(0) is null, which is the case for some forms the engine creates before any plugin is read (ids below 0x800). They are Skyrim.esm's.
+
 ### Removed
 - **The "Frame the box and show the item's name" toggle** (the owner, 2026-09-18: *"we dont need a toggle for the frame visibility"*). The preview box is always framed with the menu's theme frame and always carries the item's name; the bShowFrame INI key and its translation key are gone.
 
