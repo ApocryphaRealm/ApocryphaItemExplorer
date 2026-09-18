@@ -35,21 +35,13 @@ namespace settings
 			float         paneY;
 			float         paneSize;
 			bool          showFrame;
-			float         mapDepth;
-			float         mapBaseY;
-			float         mapBaseZ;
-			float         mapSpanX;
-			float         mapSpanY;
-			float         mapScale;
-			bool          overrideCamera;
-			float         camFov;
-			float         camX;
-			float         camY;
-			float         camZ;
-			std::uint32_t scheme;
-			std::uint32_t menuRecipe;
-			std::uint32_t loadMode;
-			bool          markerMovie;
+			float         modelScale;
+			float         offsetX;
+			float         offsetY;
+			float         backgroundR;
+			float         backgroundG;
+			float         backgroundB;
+			float         paneAlpha;
 		} defaults{};
 
 		std::string Lower(std::string a_s)
@@ -133,28 +125,22 @@ namespace settings
 			get("fpaney:preview", preview::paneY, ParseFloat);
 			get("fpanesize:preview", preview::paneSize, ParseFloat);
 			get("bshowframe:preview", preview::showFrame, ParseBool);
-			get("fmapdepth:preview", preview::mapDepth, ParseFloat);
-			get("fmapbasey:preview", preview::mapBaseY, ParseFloat);
-			get("fmapbasez:preview", preview::mapBaseZ, ParseFloat);
-			get("fmapspanx:preview", preview::mapSpanX, ParseFloat);
-			get("fmapspany:preview", preview::mapSpanY, ParseFloat);
-			get("fmapscale:preview", preview::mapScale, ParseFloat);
-			get("boverridecamera:preview", preview::overrideCamera, ParseBool);
-			get("fcamfov:preview", preview::camFov, ParseFloat);
-			get("fcamx:preview", preview::camX, ParseFloat);
-			get("fcamy:preview", preview::camY, ParseFloat);
-			get("fcamz:preview", preview::camZ, ParseFloat);
-			get("uscheme:preview", preview::scheme, ParseUInt);
-			get("umenurecipe:preview", preview::menuRecipe, ParseUInt);
-			get("uloadmode:preview", preview::loadMode, ParseUInt);
-			get("bmarkermovie:preview", preview::markerMovie, ParseBool);
-			if (preview::scheme > 7) { preview::scheme = 1; }
+			get("fmodelscale:preview", preview::modelScale, ParseFloat);
+			get("foffsetx:preview", preview::offsetX, ParseFloat);
+			get("foffsety:preview", preview::offsetY, ParseFloat);
+			get("fbackgroundr:preview", preview::backgroundR, ParseFloat);
+			get("fbackgroundg:preview", preview::backgroundG, ParseFloat);
+			get("fbackgroundb:preview", preview::backgroundB, ParseFloat);
+			get("fpanealpha:preview", preview::paneAlpha, ParseFloat);
 			if (general::defaultCount == 0) { general::defaultCount = 1; }
-			// Clamped for the same reason SetPane clamps: a pane centred off-screen or sized to
-			// nothing is a preview nobody can find, and it looks exactly like a broken renderer.
 			preview::paneX = std::clamp(preview::paneX, 0.05F, 0.95F);
 			preview::paneY = std::clamp(preview::paneY, 0.05F, 0.95F);
 			preview::paneSize = std::clamp(preview::paneSize, 0.08F, 0.90F);
+			preview::modelScale = std::clamp(preview::modelScale, 0.2F, 4.0F);
+			preview::backgroundR = std::clamp(preview::backgroundR, 0.0F, 1.0F);
+			preview::backgroundG = std::clamp(preview::backgroundG, 0.0F, 1.0F);
+			preview::backgroundB = std::clamp(preview::backgroundB, 0.0F, 1.0F);
+			preview::paneAlpha = std::clamp(preview::paneAlpha, 0.1F, 1.0F);
 			// Clamped rather than trusted: an out-of-range sort index read from a hand-edited INI
 			// would index past the end of the mode table.
 			if (general::sortMode >= static_cast<std::uint32_t>(Catalog::Sort::kCount)) { general::sortMode = 0; }
@@ -162,11 +148,8 @@ namespace settings
 						 "questItems={} sortMode={} logLevel={}",
 						 iniPath, general::defaultCount, general::includeSpells, general::show3DPreview,
 						 general::showQuestItems, general::sortMode, debug::logLevel);
-			logger::info("preview pane: ({:.3f}, {:.3f}) size {:.3f} frame={} | mapping depth={:.1f} "
-						 "base=({:.1f}, {:.1f}) span=({:.1f}, {:.1f}) scale={:.3f}",
-						 preview::paneX, preview::paneY, preview::paneSize, preview::showFrame,
-						 preview::mapDepth, preview::mapBaseY, preview::mapBaseZ,
-						 preview::mapSpanX, preview::mapSpanY, preview::mapScale);
+			logger::info("preview box: centre ({:.2f}, {:.2f}) size {:.2f} frame={}, model scale {:.2f}, offset ({:.0f}, {:.0f})",
+						 preview::paneX, preview::paneY, preview::paneSize, preview::showFrame, preview::modelScale, preview::offsetX, preview::offsetY);
 			return true;
 		}
 
@@ -198,13 +181,8 @@ namespace settings
 
 		defaults = { debug::logLevel, general::defaultCount, general::includeSpells,
 					 general::show3DPreview, general::showQuestItems, general::sortMode,
-					 preview::paneX, preview::paneY, preview::paneSize, preview::showFrame,
-					 preview::mapDepth, preview::mapBaseY, preview::mapBaseZ,
-					 preview::mapSpanX, preview::mapSpanY, preview::mapScale,
-					 preview::overrideCamera, preview::camFov, preview::camX, preview::camY,
-					 preview::camZ, preview::scheme,
-					 preview::menuRecipe, preview::loadMode,
-					 preview::markerMovie };
+					 preview::paneX, preview::paneY, preview::paneSize, preview::showFrame, preview::modelScale, preview::offsetX, preview::offsetY,
+					 preview::backgroundR, preview::backgroundG, preview::backgroundB, preview::paneAlpha };
 
 		auto* collection = utils::INISettingCollection::GetSingleton();
 		collection->AddSettings(
@@ -218,21 +196,13 @@ namespace settings
 			utils::MakeSetting("fPaneY:Preview", preview::paneY),
 			utils::MakeSetting("fPaneSize:Preview", preview::paneSize),
 			utils::MakeSetting("bShowFrame:Preview", preview::showFrame),
-			utils::MakeSetting("fMapDepth:Preview", preview::mapDepth),
-			utils::MakeSetting("fMapBaseY:Preview", preview::mapBaseY),
-			utils::MakeSetting("fMapBaseZ:Preview", preview::mapBaseZ),
-			utils::MakeSetting("fMapSpanX:Preview", preview::mapSpanX),
-			utils::MakeSetting("fMapSpanY:Preview", preview::mapSpanY),
-			utils::MakeSetting("fMapScale:Preview", preview::mapScale),
-			utils::MakeSetting("bOverrideCamera:Preview", preview::overrideCamera),
-			utils::MakeSetting("fCamFov:Preview", preview::camFov),
-			utils::MakeSetting("fCamX:Preview", preview::camX),
-			utils::MakeSetting("fCamY:Preview", preview::camY),
-			utils::MakeSetting("fCamZ:Preview", preview::camZ),
-			utils::MakeSetting("uScheme:Preview", static_cast<unsigned int>(preview::scheme)),
-			utils::MakeSetting("uMenuRecipe:Preview", static_cast<unsigned int>(preview::menuRecipe)),
-			utils::MakeSetting("uLoadMode:Preview", static_cast<unsigned int>(preview::loadMode)),
-			utils::MakeSetting("bMarkerMovie:Preview", preview::markerMovie));
+			utils::MakeSetting("fModelScale:Preview", preview::modelScale),
+			utils::MakeSetting("fOffsetX:Preview", preview::offsetX),
+			utils::MakeSetting("fOffsetY:Preview", preview::offsetY),
+			utils::MakeSetting("fBackgroundR:Preview", preview::backgroundR),
+			utils::MakeSetting("fBackgroundG:Preview", preview::backgroundG),
+			utils::MakeSetting("fBackgroundB:Preview", preview::backgroundB),
+			utils::MakeSetting("fPaneAlpha:Preview", preview::paneAlpha));
 
 		LoadFileValues();
 	}
@@ -265,21 +235,13 @@ namespace settings
 		ok &= WriteKey(lines, "Preview", "fPaneY", FloatText(preview::paneY));
 		ok &= WriteKey(lines, "Preview", "fPaneSize", FloatText(preview::paneSize));
 		ok &= WriteKey(lines, "Preview", "bShowFrame", preview::showFrame ? "1" : "0");
-		ok &= WriteKey(lines, "Preview", "fMapDepth", FloatText(preview::mapDepth));
-		ok &= WriteKey(lines, "Preview", "fMapBaseY", FloatText(preview::mapBaseY));
-		ok &= WriteKey(lines, "Preview", "fMapBaseZ", FloatText(preview::mapBaseZ));
-		ok &= WriteKey(lines, "Preview", "fMapSpanX", FloatText(preview::mapSpanX));
-		ok &= WriteKey(lines, "Preview", "fMapSpanY", FloatText(preview::mapSpanY));
-		ok &= WriteKey(lines, "Preview", "fMapScale", FloatText(preview::mapScale));
-		ok &= WriteKey(lines, "Preview", "bOverrideCamera", preview::overrideCamera ? "1" : "0");
-		ok &= WriteKey(lines, "Preview", "fCamFov", FloatText(preview::camFov));
-		ok &= WriteKey(lines, "Preview", "fCamX", FloatText(preview::camX));
-		ok &= WriteKey(lines, "Preview", "fCamY", FloatText(preview::camY));
-		ok &= WriteKey(lines, "Preview", "fCamZ", FloatText(preview::camZ));
-		ok &= WriteKey(lines, "Preview", "uScheme", std::to_string(preview::scheme));
-		ok &= WriteKey(lines, "Preview", "uMenuRecipe", std::to_string(preview::menuRecipe));
-		ok &= WriteKey(lines, "Preview", "uLoadMode", std::to_string(preview::loadMode));
-		ok &= WriteKey(lines, "Preview", "bMarkerMovie", preview::markerMovie ? "1" : "0");
+		ok &= WriteKey(lines, "Preview", "fModelScale", FloatText(preview::modelScale));
+		ok &= WriteKey(lines, "Preview", "fOffsetX", FloatText(preview::offsetX));
+		ok &= WriteKey(lines, "Preview", "fOffsetY", FloatText(preview::offsetY));
+		ok &= WriteKey(lines, "Preview", "fBackgroundR", FloatText(preview::backgroundR));
+		ok &= WriteKey(lines, "Preview", "fBackgroundG", FloatText(preview::backgroundG));
+		ok &= WriteKey(lines, "Preview", "fBackgroundB", FloatText(preview::backgroundB));
+		ok &= WriteKey(lines, "Preview", "fPaneAlpha", FloatText(preview::paneAlpha));
 
 		std::ofstream out(iniPath, std::ios::trunc);
 		if (!out) { logger::error("Save: could not open {} for writing", iniPath); return false; }
@@ -300,21 +262,13 @@ namespace settings
 		preview::paneY = defaults.paneY;
 		preview::paneSize = defaults.paneSize;
 		preview::showFrame = defaults.showFrame;
-		preview::mapDepth = defaults.mapDepth;
-		preview::mapBaseY = defaults.mapBaseY;
-		preview::mapBaseZ = defaults.mapBaseZ;
-		preview::mapSpanX = defaults.mapSpanX;
-		preview::mapSpanY = defaults.mapSpanY;
-		preview::mapScale = defaults.mapScale;
-		preview::overrideCamera = defaults.overrideCamera;
-		preview::camFov = defaults.camFov;
-		preview::camX = defaults.camX;
-		preview::camY = defaults.camY;
-		preview::camZ = defaults.camZ;
-		preview::scheme = defaults.scheme;
-		preview::menuRecipe = defaults.menuRecipe;
-		preview::loadMode = defaults.loadMode;
-		preview::markerMovie = defaults.markerMovie;
+		preview::modelScale = defaults.modelScale;
+		preview::offsetX = defaults.offsetX;
+		preview::offsetY = defaults.offsetY;
+		preview::backgroundR = defaults.backgroundR;
+		preview::backgroundG = defaults.backgroundG;
+		preview::backgroundB = defaults.backgroundB;
+		preview::paneAlpha = defaults.paneAlpha;
 		ApplyLogLevel();
 	}
 

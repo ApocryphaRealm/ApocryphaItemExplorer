@@ -5,12 +5,13 @@
 #include "Catalog.h"
 #include "UI.h"
 #include "Preview.h"
-#include "PreviewMenu.h"
 #include "DevBench/DevBenchAPI.h"
 #include "Settings.h"
 
 #include "utils/Logger.h"
 
+#include <algorithm>
+#include <cstdio>
 #include <format>
 #include <string>
 #include <string_view>
@@ -96,86 +97,53 @@ namespace DevBenchTool
 			}
 
 			// op=preview:<hex form id> - point the 3D preview at a form with no mouse click.
-			// op=pane:cx,cy,size       - move the pane the model is placed inside, in screen fractions.
-			if (const auto at = args.find("xrefs:"); at != std::string_view::npos)
+			if (const auto at = args.find("preview:"); at != std::string_view::npos && !has("previewstate"))
 			{
-				std::uintptr_t off = 0;
-				std::sscanf(std::string(args.substr(at + 6, 24)).c_str(), "%llx", &off);
-				a_write(a_sink, std::format(R"({{"ok":true,"op":"xrefs","xrefs":{}}})",
-											preview::CallSitesOf(off)).c_str());
+				EnsureBuilt();
+				std::uint32_t id = 0;
+				try { id = static_cast<std::uint32_t>(std::stoul(After(args, "preview:"), nullptr, 16)); } catch (...) { id = 0; }
+				UI::PreviewByFormID(id);
+				a_write(a_sink, std::format(R"({{"ok":{},"op":"preview","formID":"0x{:08X}","previewed":"0x{:08X}"}})",
+											UI::PreviewedFormID() != 0 ? "true" : "false", id, UI::PreviewedFormID()).c_str());
 				return;
 			}
-			// op=datarefs:<hex offset> - where that function's address appears as data.
-			if (const auto at = args.find("datarefs:"); at != std::string_view::npos)
+			// op=pane:<cx>,<cy>,<size> - move the floating box, in fractions of the screen.
+			if (has("pane:"))
 			{
-				std::uintptr_t off = 0;
-				std::sscanf(std::string(args.substr(at + 9, 24)).c_str(), "%llx", &off);
-				a_write(a_sink, std::format(R"({{"ok":true,"op":"datarefs","datarefs":{}}})",
-											preview::DataRefsTo(off)).c_str());
+				const std::string v = After(args, "pane:");
+				float cx = 0.0F, cy = 0.0F, sz = 0.0F;
+				if (sscanf_s(v.c_str(), "%f,%f,%f", &cx, &cy, &sz) == 3)
+				{
+					settings::preview::paneX = std::clamp(cx, 0.05F, 0.95F);
+					settings::preview::paneY = std::clamp(cy, 0.05F, 0.95F);
+					settings::preview::paneSize = std::clamp(sz, 0.08F, 0.90F);
+				}
+				a_write(a_sink, std::format(R"({{"ok":true,"op":"pane","x":{:.2f},"y":{:.2f},"size":{:.2f}}})",
+											settings::preview::paneX, settings::preview::paneY, settings::preview::paneSize).c_str());
 				return;
 			}
-			// op=fx:<MenuName> - the GameDelegate callbacks a live menu has registered.
-			if (const auto at = args.find("fx:"); at != std::string_view::npos)
+			// op=norestore:<0|1> - diagnostic: leave the engine's paint on the back buffer.
+			if (has("norestore:"))
 			{
-				std::string name(args.substr(at + 3));
-				const auto end = name.find_first_of("\"},");
-				if (end != std::string::npos) { name = name.substr(0, end); }
-				a_write(a_sink, std::format(R"({{"ok":true,"op":"fx","fx":{}}})",
-											preview::FxCallbacks(name)).c_str());
+				preview::SetNoRestore(After(args, "norestore:").rfind("1", 0) == 0);
+				a_write(a_sink, std::format(R"({{"ok":true,"op":"norestore","noRestore":{}}})", preview::GetStatus().noRestore).c_str());
 				return;
 			}
-			// op=dump:<hex offset>:<length> - raw bytes from the running module, for disassembly.
-			if (const auto at = args.find("dump:"); at != std::string_view::npos)
+			// op=previewstate - what the preview is doing, read off the engine and off this mod.
+			if (has("previewstate"))
 			{
-				std::uintptr_t off = 0;
-				unsigned       len = 0x100;
-                std::sscanf(std::string(args.substr(at + 5, 40)).c_str(), "%llx:%u", &off, &len);
-				a_write(a_sink, std::format(R"({{"ok":true,"op":"dump","dump":{}}})",
-											preview::DumpBytes(off, len)).c_str());
-				return;
-			}
-			if (has("scanmenu"))
-			{
-				a_write(a_sink, std::format(R"({{"ok":true,"op":"scanmenu","scan":{}}})",
-											preview::ScanInventoryPreDisplay()).c_str());
-				return;
-			}
-			if (has("menuflags"))
-			{
-				a_write(a_sink, std::format(R"({{"ok":true,"op":"menuflags","menus":{}}})",
-											preview::OpenMenuFlags()).c_str());
-				return;
-			}
-			if (has("uiscene"))
-			{
-				const auto sc = preview::GetSceneState();
+				const auto st = preview::GetStatus();
 				a_write(a_sink, std::format(
-					R"({{"ok":{},"op":"uiscene","cameraPresent":{},"occupiedSlots":{},"ourSlot":{},)"
-					R"("lightScheme":{},"currentMenu":{},"menuIDCount":{},"lightCount":{},)"
-					R"("loadedModels":{},"meshCount":{},"menuIDs":{}}})",
-					sc.available ? "true" : "false", sc.cameraPresent ? "true" : "false",
-					sc.occupiedSlots, sc.ourSlot, sc.lightScheme, sc.currentMenu,
-					sc.menuIDCount, sc.lightCount,
-					sc.loadedModels, sc.meshCount,
-					sc.menuIDs.empty() ? std::string("[]") : sc.menuIDs).c_str());
-				return;
-			}
-			if (has("openinventory"))
-			{
-				preview::OpenGameMenu("InventoryMenu");
-				a_write(a_sink, R"({"ok":true,"op":"openinventory"})");
-				return;
-			}
-			// op=openmenu:<MenuName> - any of the game's menus by name. The question it answers:
-			// does the UI 3D scene need MENU MODE (a paused game), or specifically a menu that
-			// renders 3D? The journal pauses and shows no 3D, so it separates the two.
-			if (const auto at = args.find("openmenu:"); at != std::string_view::npos)
-			{
-				std::string name(args.substr(at + 9));
-				const auto end = name.find_first_of("\"},");
-				if (end != std::string::npos) { name = name.substr(0, end); }
-				preview::OpenGameMenu(name);
-				a_write(a_sink, std::format(R"({{"ok":true,"op":"openmenu","name":"{}"}})", EscapeJson(name)).c_str());
+					R"({{"ok":true,"op":"previewstate","available":{},"menuOpen":{},"running":{},"textures":{},)"
+					R"("previewedFormID":"0x{:08X}","requestedFormID":"0x{:08X}","currentFormID":"0x{:08X}",)"
+					R"("loads":{},"renders":{},"managerModels":{},"capturedW":{:.0f},"capturedH":{:.0f},"paneW":{:.0f},"paneH":{:.0f},)"
+					R"("sinceHeartbeatMs":{:.0f},"inventory3DSetting":{},"settingForced":{},)"
+					R"("rect":[{},{},{},{}],"bound":[{:.1f},{:.1f},{:.1f}],"radius":{:.1f},"translate":[{:.1f},{:.1f},{:.1f}],"screen":[{:.0f},{:.0f}],"screenSize":[{},{}],"noRestore":{},"target":[{},{},{}],"lastError":"{}"}})",
+					st.available, st.menuOpen, st.running, st.textures, UI::PreviewedFormID(), st.requestedFormID, st.currentFormID,
+					st.loads, st.renders, st.managerModels, st.capturedW, st.capturedH, st.paneW, st.paneH, st.sinceHeartbeatMs,
+					st.inventory3DSetting, st.settingForced,
+					st.rectL, st.rectT, st.rectW, st.rectH, st.boundX, st.boundY, st.boundZ, st.radius, st.transX, st.transY, st.transZ,
+					st.screenX, st.screenY, st.screenW, st.screenH, st.noRestore, st.targetW, st.targetH, st.targetFormat, EscapeJson(st.lastError)).c_str());
 				return;
 			}
 			if (has("find:") || has("findall:"))
@@ -293,18 +261,10 @@ namespace DevBenchTool
 			"op=give:<hex formID>[:<count>] puts an item in the player's inventory through the game's own "
 			"path, queued onto the main thread; a spell is taught instead of added. op=reload re-reads the "
 			"INI. No argument reports settings and whether the catalogue has been built yet. "
-			"The 3D preview configuration sweep: op=config:<recipe>,<loadMode>,<marker> sets which "
-			"flags the preview menu is built with (0 InventoryMenu's set, 1 SKSE CustomMenu's, 2 "
-			"that without kRendersOffscreenTargets, 3 both families), which overload loads the "
-			"model (0 inventory entry, 1 bound object), and whether the menu gets a movie that "
-			"draws a marker rectangle (1) or the blank one (0); it closes the menu so the next "
-			"preview rebuilds it under the new recipe. "
-			"The 3D preview: op=preview:<hex formID> selects the form the preview follows, without a "
-			"mouse click; op=pane:<cx>,<cy>,<size> moves the pane it is drawn inside, in fractions of "
-			"the screen; op=place:<x>,<y>,<z>,<scale> is the raw placement override in the renderer's "
-			"own units, which is how the pane-to-model mapping is calibrated, and a scale of 0 clears "
-			"it; op=previewstate reports what is showing, the pane in pixels, and what was last handed "
-			"to the game's 3D manager.\","
+			"The 3D preview: op=preview:<hex formID> makes the pane show that form with no mouse; "
+			"op=previewstate reports whether the helper menu is open, whether the engine holds a model "
+			"(managerModels), how many captures landed (renders) and the captured size; op=pane:<cx>,<cy>,<size> "
+			"moves the floating box in screen fractions; op=norestore:1 leaves the engine's paint on screen (diagnostic).\","
 			"\"inputSchema\":{\"type\":\"object\",\"properties\":{\"op\":{\"type\":\"string\"}}},"
 			"\"readOnly\":false"
 			"}";

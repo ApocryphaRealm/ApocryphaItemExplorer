@@ -6,6 +6,7 @@
 
 #include "Catalog.h"
 #include "Favourites.h"
+#include "Preview.h"
 #include "Settings.h"
 
 #include "utils/Logger.h"
@@ -55,6 +56,12 @@ namespace UI
 		// the low end, so the special case lives on the one row it applies to (the owner, 2026-09-10:
 		// "up to 50 for consumables and 10000 for gold").
 		int         g_goldCount = 100;
+
+		// The row the 3D preview follows: whatever the cursor is over, or what the D-pad has
+		// focused. A pointer into the catalogue, which is stable until the catalogue is rebuilt -
+		// both rebuild sites below clear it.
+		const Catalog::Item* g_previewItem = nullptr;
+
 
 		constexpr int kStackMax = 50;      // consumables AND crafting materials
 		constexpr int kGoldMax  = 10000;
@@ -138,12 +145,15 @@ namespace UI
 			"igGetCursorScreenPos", "igGetWindowDrawList", "igGetFrameHeight",
 			"igInvisibleButton", "igIsItemHovered",
 			"ImDrawList_AddRectFilled", "ImDrawList_AddCircleFilled",
-			// the 3D preview's pane: its corners and caption are drawn on the framework's
+			// the 3D preview's floating box: its frame, caption and picture are drawn on the framework's
 			// SCREEN-WIDE foreground list, which arrived in Apocrypha Menu Framework 1.5.8.
 			// A framework older than that is refused here rather than met with a null call.
 			"igGetIO", "igGetForegroundDrawList_Nil",
 			"ImDrawList_AddLine", "ImDrawList_AddText_Vec2",
-			"igSliderFloat", "igCombo_Str_arr"
+			"igSliderFloat", "igCombo_Str_arr",
+			// 1.0.7: the 3D preview pane is an image of the engine's own render, and the row under
+			// the cursor OR under D-pad focus is what it shows.
+			"igIsItemFocused", "ImDrawList_AddImage"
 		};
 
 		bool HasRequiredExports()
@@ -223,6 +233,42 @@ namespace UI
 
 		// One item as a plain row: the Add button, the name, then the quiet details. No table API -
 		// older frameworks do not export it, and a row reads just as well.
+		// The last widget drawn is the one under the cursor or under D-pad focus: make its row the
+		// previewed one. Called after each of a row's controls, so any of them counts.
+		void NoteRow(const Catalog::Item& a_item)
+		{
+			if (ImGuiMCP::IsItemHovered() || ImGuiMCP::IsItemFocused()) { g_previewItem = &a_item; }
+		}
+
+		// The floating preview box: the heartbeat that keeps the helper menu open, the request for
+		// whatever row is under the cursor, and the box itself, drawn in front of this window. One
+		// call at the end of each page's render.
+		void DrawPreviewFloating()
+		{
+			if (!settings::general::show3DPreview || !preview::Available()) { return; }
+			float x0 = 0.0F, y0 = 0.0F, x1 = 0.0F, y1 = 0.0F;
+			if (!preview::PaneRect(x0, y0, x1, y1)) { return; }
+			preview::Heartbeat();
+			preview::Request(g_previewItem && g_previewItem->form ? g_previewItem->form : nullptr, x1 - x0, y1 - y0);
+			const char* title = nullptr;
+			if (g_previewItem) { title = g_previewItem->name.empty() ? g_previewItem->editorID.c_str() : g_previewItem->name.c_str(); }
+			preview::DrawFloating(title);
+		}
+
+		// Where the box sits: the earlier version's sliders (the owner, 2026-09-18: the SkyHUD
+		// Settings Menu way of moving things - a position you set, shown live).
+		void DrawPreviewSettings()
+		{
+			if (!settings::general::show3DPreview) { return; }
+			ImGuiMCP::TextDisabled("%s", strings::TR("AIE_PreviewWhere", "Where the preview box sits - it floats in front of this window, so put it anywhere"));
+			ImGuiMCP::PushItemWidth(220.0F);
+			ImGuiMCP::SliderFloat(strings::TR("AIE_PreviewX", "Pane across"), &settings::preview::paneX, 0.05F, 0.95F, "%.2f", 0);
+			ImGuiMCP::SliderFloat(strings::TR("AIE_PreviewY", "Pane down"), &settings::preview::paneY, 0.05F, 0.95F, "%.2f", 0);
+			ImGuiMCP::SliderFloat(strings::TR("AIE_PreviewSize", "Pane size"), &settings::preview::paneSize, 0.08F, 0.90F, "%.2f", 0);
+			ImGuiMCP::PopItemWidth();
+			ImGuiMCP::Toggle(strings::TR("AIE_PreviewFrame", "Frame the box and show the item's name"), &settings::preview::showFrame);
+		}
+
 		void DrawItemRow(const Catalog::Item& a_item, bool a_showPlugin)
 		{
 			// The form ID makes every row's widgets unique; without it ImGui merges buttons that
@@ -246,6 +292,7 @@ namespace UI
 						   std::to_string(count) + " x " +
 						   (a_item.name.empty() ? a_item.editorID : a_item.name);
 			}
+			NoteRow(a_item);
 
 			// Gold's own amount, shown only on the gold row so the wide range never gets in the way
 			// of ordinary items.
@@ -267,6 +314,7 @@ namespace UI
 			{
 				favourites::Toggle(a_item.form, a_item.name.empty() ? a_item.editorID : a_item.name);
 			}
+			NoteRow(a_item);
 			if (ImGuiMCP::IsItemHovered())
 			{
 				ImGuiMCP::SetTooltip("%s", fav ? strings::TR("AIE_FavRemoveTip", "Remove from favourites")
@@ -275,7 +323,7 @@ namespace UI
 
 			ImGuiMCP::SameLine();
 			ImGuiMCP::Text("%s", a_item.name.empty() ? a_item.editorID.c_str() : a_item.name.c_str());
-
+			NoteRow(a_item);
 
 			// A quest item is called out wherever it appears, whether or not they are being hidden -
 			// handing yourself one can confuse the quest that owns it, and that is worth knowing
@@ -339,6 +387,7 @@ namespace UI
 			if (ImGuiMCP::Button(strings::TR("AIE_Build", "Read the load order")))
 			{
 				const std::size_t n = Catalog::Build();
+				g_previewItem = nullptr;
 				g_status = std::to_string(n) + " " +
 						   strings::TR("AIE_ItemsFound", "items found");
 			}
@@ -360,6 +409,7 @@ namespace UI
 		{
 			Catalog::Build();
 			g_selectedPlugin = -1;
+			g_previewItem = nullptr;
 		}
 
 		ImGuiMCP::Spacing();
@@ -380,6 +430,8 @@ namespace UI
 
 		DrawKindFilters();
 		ImGuiMCP::Spacing();
+		DrawPreviewSettings();
+		ImGuiMCP::Spacing();
 		ImGuiMCP::Separator();
 
 		// ---- Search everywhere: one list, no plugin picking ----
@@ -397,6 +449,7 @@ namespace UI
 			if (g_itemSearch[0] == '\0')
 			{
 				ImGuiMCP::TextDisabled("%s", strings::TR("AIE_TypeToSearch", "Type to search."));
+				DrawPreviewFloating();
 				return;
 			}
 
@@ -410,6 +463,7 @@ namespace UI
 				for (const auto* item : hits) { DrawItemRow(*item, true); }
 			}
 			ImGuiMCP::EndChild();
+			DrawPreviewFloating();
 
 			if (!g_status.empty())
 			{
@@ -483,6 +537,7 @@ namespace UI
 			}
 		}
 		ImGuiMCP::EndChild();
+		DrawPreviewFloating();
 
 		if (!g_status.empty())
 		{
@@ -557,6 +612,7 @@ namespace UI
 			for (const auto* item : items) { DrawItemRow(*item, true); }
 		}
 		ImGuiMCP::EndChild();
+		DrawPreviewFloating();
 
         if (!g_status.empty())
         {
@@ -565,4 +621,12 @@ namespace UI
         }
 
 	}
+
+	void PreviewByFormID(std::uint32_t a_formID)
+	{
+		auto* form = RE::TESForm::LookupByID(a_formID);
+		g_previewItem = form ? Catalog::Find(form) : nullptr;
+	}
+
+	std::uint32_t PreviewedFormID() { return g_previewItem ? g_previewItem->formID : 0; }
 }

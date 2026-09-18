@@ -51,3 +51,26 @@ Third-party components, each under its own permissive licence:
 Compatibility note: Apocrypha Menu Framework exports an API compatible with the PUBLIC consumer
 header of SKSE Menu Framework so that mods written against that header can register with it. It
 is an original implementation and contains no code from SKSE Menu Framework.
+
+## Modex - Mod Explorer Menu (the 3D preview capture)
+
+https://github.com/patchulidev/ModExplorerMenu, by Patchuli, dual-licensed MIT / GPL-3.0. The 3D item preview's
+capture pipeline in `source/Preview.cpp` - save the back-buffer rectangle, clear it, let `Inventory3DManager` render
+the model, copy the rectangle into a texture, restore the saved pixels, and project the model's bound through the UI
+scene's frustum to find the rectangle - is a port of `src/ui/components/Item3DPreview.cpp`, taken under the GPL-3.0
+option so the whole work stays GPL-3.0-or-later. The helper-menu flag recipe (kPausesGame with kDisablePauseMenu)
+comes from the same project's issue #48 (cyfewlp). Modex's MIT notice, reproduced as that licence asks:
+
+```
+MIT License
+
+Copyright (c) 2026 Patchuli
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the Software without restriction, including without limitation the
+rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit
+persons to whom the Software is furnished to do so, subject to the following conditions: The above copyright notice
+and this permission notice shall be included in all copies or substantial portions of the Software. THE SOFTWARE IS
+PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
+```
+

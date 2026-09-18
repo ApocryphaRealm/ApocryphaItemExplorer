@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.7 - 2026-09-18 - untested
+
+### Added
+- The 3D item preview is back, and this time it draws. The item under the cursor - or under D-pad focus - appears in a floating box: black, white-framed, the item's name inside it, drawn in front of the framework window wherever you put it (three sliders on the Browse page: across, down, size; `[Preview]` in the INI keeps them). The model is the game's own inventory render, lifted off the engine's frame buffer into a texture the page draws opaque on the black. What was wrong before (1.0.3-1.0.4): the engine only builds inventory 3D for a menu that pauses the game the inventory's way (kPausesGame with kDisablePauseMenu), the load only completes inside the engine's own render call, that render draws into the frame buffer the engine has bound rather than the swap chain, and on SE 1.5.97 CommonLibSSE-NG's Render binding points at a three-argument sibling - so the inventory's real render (Address Library 50882) is called by id. The flag recipe and the capture come from Modex - Mod Explorer Menu (Patchuli; issue #48 and its Item3DPreview), credited in THIRD_PARTY_NOTICES.md. While the box is showing the game is paused, as it is inside the inventory. The engine's own `bShowInventory3D` switch is turned on for the session if a player's INI has it off, and restored after.
+- DevBench: `op=preview:<hex formID>` points the box at a form, `op=previewstate` reports the engine-side state (model held, captures landed, geometry), `op=pane:<cx>,<cy>,<size>` moves the box, `op=norestore:1` leaves the engine's paint on screen for a diagnostic frame.
+
+### Removed
+- The 1.0.4-era preview research: the menu-recipe, camera, light-scheme, load-mode and marker-movie settings and the DevBench xrefs/datarefs/fx/dump/scanmenu/menuflags/uiscene/openmenu operations. `[Preview]` in the INI is a smaller section: position, size, frame, model scale, offset, background.
+
 ## 1.0.6 - 2026-09-16 - untested
 
 ### Changed
