@@ -17,6 +17,7 @@
 #include "PreviewMenu.h"
 #include "UI.h"
 
+#include "utils/AddressLibraryGuard.h"
 #include "utils/Logger.h"
 #include "utils/Strings.h"
 
@@ -52,6 +53,14 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 {
 	SKSE::Init(a_skse);
 	SKSE::log::init("ItemExplorer");
+
+	// 1.0.7: before anything resolves an address, say which Address Library file this game needs and whether it
+	// is there; when it is missing the plugin loads inert with a message that names the file (the guard every
+	// mod of ours carries since Wheeler 1.2.9).
+	if (!AddressLibraryGuard::Guard("Item Explorer"))
+	{
+		return true;
+	}
 
 	settings::Init("ItemExplorer.ini");
 	settings::ApplyLogLevel();
