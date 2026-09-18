@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.9 - 2026-09-18 - untested
+
+### Removed
+- **The "Frame the box and show the item's name" toggle** (the owner, 2026-09-18: *"we dont need a toggle for the frame visibility"*). The preview box is always framed with the menu's theme frame and always carries the item's name; the bShowFrame INI key and its translation key are gone.
+
+### Changed
+- **The Kinds filter toggles sit in three neat columns** (the owner, 2026-09-18: *"i want the filter toggles to be in neat columns of 3 toggles instead of them all being aliigned to the left"*). A table lays them out, so the columns line up whatever each label's width is; before, a chain of SameLine calls put four ragged toggles on a row and the skipped spell toggle threw its count off.
+
 ## 1.0.8 - 2026-09-18 - untested
 
 ### Changed

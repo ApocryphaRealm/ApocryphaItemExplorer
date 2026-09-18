@@ -244,7 +244,6 @@ namespace preview
 												  ImGuiMCP::ImVec2{ u0, v0 }, ImGuiMCP::ImVec2{ u1, v1 }, col(255, 255, 255, 255));
 		}
 
-		if (!settings::preview::showFrame) { return; }
 		// The framework's own theme frame - the Skyrim theme's Nordic knotwork (the owner, 2026-09-18:
 		// "apply the same Nordic knotwork that's in the Skyrim theme for AMF to this texture rendering
 		// frame") - through AMF_DrawThemeFrame (Apocrypha Menu Framework 1.8.9). A framework without the

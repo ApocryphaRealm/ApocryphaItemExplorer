@@ -34,7 +34,6 @@ namespace settings
 			float         paneX;
 			float         paneY;
 			float         paneSize;
-			bool          showFrame;
 			float         modelScale;
 			float         offsetX;
 			float         offsetY;
@@ -124,7 +123,6 @@ namespace settings
 			get("fpanex:preview", preview::paneX, ParseFloat);
 			get("fpaney:preview", preview::paneY, ParseFloat);
 			get("fpanesize:preview", preview::paneSize, ParseFloat);
-			get("bshowframe:preview", preview::showFrame, ParseBool);
 			get("fmodelscale:preview", preview::modelScale, ParseFloat);
 			get("foffsetx:preview", preview::offsetX, ParseFloat);
 			get("foffsety:preview", preview::offsetY, ParseFloat);
@@ -148,8 +146,8 @@ namespace settings
 						 "questItems={} sortMode={} logLevel={}",
 						 iniPath, general::defaultCount, general::includeSpells, general::show3DPreview,
 						 general::showQuestItems, general::sortMode, debug::logLevel);
-			logger::info("preview box: centre ({:.2f}, {:.2f}) size {:.2f} frame={}, model scale {:.2f}, offset ({:.0f}, {:.0f})",
-						 preview::paneX, preview::paneY, preview::paneSize, preview::showFrame, preview::modelScale, preview::offsetX, preview::offsetY);
+			logger::info("preview box: centre ({:.2f}, {:.2f}) size {:.2f}, model scale {:.2f}, offset ({:.0f}, {:.0f})",
+						 preview::paneX, preview::paneY, preview::paneSize, preview::modelScale, preview::offsetX, preview::offsetY);
 			return true;
 		}
 
@@ -181,7 +179,7 @@ namespace settings
 
 		defaults = { debug::logLevel, general::defaultCount, general::includeSpells,
 					 general::show3DPreview, general::showQuestItems, general::sortMode,
-					 preview::paneX, preview::paneY, preview::paneSize, preview::showFrame, preview::modelScale, preview::offsetX, preview::offsetY,
+					 preview::paneX, preview::paneY, preview::paneSize, preview::modelScale, preview::offsetX, preview::offsetY,
 					 preview::backgroundR, preview::backgroundG, preview::backgroundB, preview::paneAlpha };
 
 		auto* collection = utils::INISettingCollection::GetSingleton();
@@ -195,7 +193,6 @@ namespace settings
 			utils::MakeSetting("fPaneX:Preview", preview::paneX),
 			utils::MakeSetting("fPaneY:Preview", preview::paneY),
 			utils::MakeSetting("fPaneSize:Preview", preview::paneSize),
-			utils::MakeSetting("bShowFrame:Preview", preview::showFrame),
 			utils::MakeSetting("fModelScale:Preview", preview::modelScale),
 			utils::MakeSetting("fOffsetX:Preview", preview::offsetX),
 			utils::MakeSetting("fOffsetY:Preview", preview::offsetY),
@@ -234,7 +231,6 @@ namespace settings
 		ok &= WriteKey(lines, "Preview", "fPaneX", FloatText(preview::paneX));
 		ok &= WriteKey(lines, "Preview", "fPaneY", FloatText(preview::paneY));
 		ok &= WriteKey(lines, "Preview", "fPaneSize", FloatText(preview::paneSize));
-		ok &= WriteKey(lines, "Preview", "bShowFrame", preview::showFrame ? "1" : "0");
 		ok &= WriteKey(lines, "Preview", "fModelScale", FloatText(preview::modelScale));
 		ok &= WriteKey(lines, "Preview", "fOffsetX", FloatText(preview::offsetX));
 		ok &= WriteKey(lines, "Preview", "fOffsetY", FloatText(preview::offsetY));
@@ -261,7 +257,6 @@ namespace settings
 		preview::paneX = defaults.paneX;
 		preview::paneY = defaults.paneY;
 		preview::paneSize = defaults.paneSize;
-		preview::showFrame = defaults.showFrame;
 		preview::modelScale = defaults.modelScale;
 		preview::offsetX = defaults.offsetX;
 		preview::offsetY = defaults.offsetY;

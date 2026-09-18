@@ -153,7 +153,8 @@ namespace UI
 			"igSliderFloat", "igCombo_Str_arr",
 			// 1.0.7: the 3D preview pane is an image of the engine's own render, and the row under
 			// the cursor OR under D-pad focus is what it shows.
-			"igIsItemFocused", "ImDrawList_AddImage", "igCalcTextSize"
+			"igIsItemFocused", "ImDrawList_AddImage", "igCalcTextSize",
+			"igBeginTable", "igEndTable", "igTableNextColumn"
 		};
 
 		bool HasRequiredExports()
@@ -175,13 +176,20 @@ namespace UI
 		void DrawKindFilters()
 		{
 			ImGuiMCP::SeparatorText(strings::TR("AIE_Kinds", "Kinds"));
-			for (std::size_t i = 0; i < kKindCount; ++i)
+			// Three neat columns (the owner, 2026-09-18: "i want the filter toggles to be in neat columns of 3
+			// toggles instead of them all being aligned to the left"). A table, so the columns line up whatever
+			// each label's width is; the old SameLine chain put four ragged toggles on a row, and skipping the
+			// spell toggle threw its count off.
+			if (ImGuiMCP::BeginTable("##kinds", 3, ImGuiMCP::ImGuiTableFlags_SizingStretchSame))
 			{
-				const auto kind = static_cast<Catalog::Kind>(i);
-				if (kind == Catalog::Kind::kSpell && !settings::general::includeSpells) { continue; }
-
-				ImGuiMCP::Toggle(KindLabel(kind), &g_kind[i]);
-				if ((i % 4) != 3 && i + 1 < kKindCount) { ImGuiMCP::SameLine(); }
+				for (std::size_t i = 0; i < kKindCount; ++i)
+				{
+					const auto kind = static_cast<Catalog::Kind>(i);
+					if (kind == Catalog::Kind::kSpell && !settings::general::includeSpells) { continue; }
+					ImGuiMCP::TableNextColumn();
+					ImGuiMCP::Toggle(KindLabel(kind), &g_kind[i]);
+				}
+				ImGuiMCP::EndTable();
 			}
 			ImGuiMCP::Spacing();
 
@@ -266,7 +274,6 @@ namespace UI
 			ImGuiMCP::SliderFloat(strings::TR("AIE_PreviewY", "Pane down"), &settings::preview::paneY, 0.05F, 0.95F, "%.2f", 0);
 			ImGuiMCP::SliderFloat(strings::TR("AIE_PreviewSize", "Pane size"), &settings::preview::paneSize, 0.08F, 0.90F, "%.2f", 0);
 			ImGuiMCP::PopItemWidth();
-			ImGuiMCP::Toggle(strings::TR("AIE_PreviewFrame", "Frame the box and show the item's name"), &settings::preview::showFrame);
 		}
 
 		void DrawItemRow(const Catalog::Item& a_item, bool a_showPlugin)

@@ -41,7 +41,6 @@ namespace settings
 		inline float paneY = 0.50F;        // fPaneY:Preview
 		inline float paneSize = 0.28F;     // fPaneSize:Preview
 		// The corner brackets and the item-name caption above the box.
-		inline bool  showFrame = true;     // bShowFrame:Preview
 		inline float modelScale = 1.0F;    // fModelScale:Preview - 1 = as the game draws it; 0.5 = half
 		inline float offsetX = 0.0F;       // fOffsetX:Preview - nudge the model in the pane, pixels
 		inline float offsetY = 0.0F;       // fOffsetY:Preview
