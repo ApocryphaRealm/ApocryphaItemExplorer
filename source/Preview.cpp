@@ -245,11 +245,19 @@ namespace preview
 		}
 
 		if (!settings::preview::showFrame) { return; }
-		// A white frame all the way round.
-		ImGuiMCP::ImDrawListManager::AddLine(dl, ImGuiMCP::ImVec2{ x0, y0 }, ImGuiMCP::ImVec2{ x1, y0 }, kLine, 2.0F);
-		ImGuiMCP::ImDrawListManager::AddLine(dl, ImGuiMCP::ImVec2{ x1, y0 }, ImGuiMCP::ImVec2{ x1, y1 }, kLine, 2.0F);
-		ImGuiMCP::ImDrawListManager::AddLine(dl, ImGuiMCP::ImVec2{ x1, y1 }, ImGuiMCP::ImVec2{ x0, y1 }, kLine, 2.0F);
-		ImGuiMCP::ImDrawListManager::AddLine(dl, ImGuiMCP::ImVec2{ x0, y1 }, ImGuiMCP::ImVec2{ x0, y0 }, kLine, 2.0F);
+		// The framework's own theme frame - the Skyrim theme's Nordic knotwork (the owner, 2026-09-18:
+		// "apply the same Nordic knotwork that's in the Skyrim theme for AMF to this texture rendering
+		// frame") - through AMF_DrawThemeFrame (Apocrypha Menu Framework 1.8.9). A framework without the
+		// export, or a theme without a frame, gets a plain white line instead.
+		using DrawThemeFrame_t = bool (*)(void*, float, float, float, float);
+		static DrawThemeFrame_t s_themeFrame = GetMenuFrameworkFunction<DrawThemeFrame_t>("AMF_DrawThemeFrame");
+		if (!s_themeFrame || !s_themeFrame(dl, x0, y0, x1, y1))
+		{
+			ImGuiMCP::ImDrawListManager::AddLine(dl, ImGuiMCP::ImVec2{ x0, y0 }, ImGuiMCP::ImVec2{ x1, y0 }, kLine, 2.0F);
+			ImGuiMCP::ImDrawListManager::AddLine(dl, ImGuiMCP::ImVec2{ x1, y0 }, ImGuiMCP::ImVec2{ x1, y1 }, kLine, 2.0F);
+			ImGuiMCP::ImDrawListManager::AddLine(dl, ImGuiMCP::ImVec2{ x1, y1 }, ImGuiMCP::ImVec2{ x0, y1 }, kLine, 2.0F);
+			ImGuiMCP::ImDrawListManager::AddLine(dl, ImGuiMCP::ImVec2{ x0, y1 }, ImGuiMCP::ImVec2{ x0, y0 }, kLine, 2.0F);
+		}
 
 		// The caption sits INSIDE the box, along its top edge (the owner, 2026-09-18: it was
 		// spilling outside the bounds): the item's name, or what to do.

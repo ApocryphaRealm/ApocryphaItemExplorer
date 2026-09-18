@@ -1,6 +1,11 @@
 # Changelog
 
-## 1.0.7 - 2026-09-18 - untested
+## 1.0.8 - 2026-09-18 - untested
+
+### Changed
+- The preview box's frame is the Apocrypha Menu Framework's own theme frame - the Skyrim theme's Nordic knotwork, drawn just outside the box the way the framework frames its window - through the framework's new `AMF_DrawThemeFrame` export (1.8.9). On an older framework, or a theme without a frame, the box keeps its plain white line.
+
+## 1.0.7 - 2026-09-18 - working
 
 ### Added
 - The 3D item preview is back, and this time it draws. The item under the cursor - or under D-pad focus - appears in a floating box: black, white-framed, the item's name inside it, drawn in front of the framework window wherever you put it (three sliders on the Browse page: across, down, size; `[Preview]` in the INI keeps them). The model is the game's own inventory render, lifted off the engine's frame buffer into a texture the page draws opaque on the black. What was wrong before (1.0.3-1.0.4): the engine only builds inventory 3D for a menu that pauses the game the inventory's way (kPausesGame with kDisablePauseMenu), the load only completes inside the engine's own render call, that render draws into the frame buffer the engine has bound rather than the swap chain, and on SE 1.5.97 CommonLibSSE-NG's Render binding points at a three-argument sibling - so the inventory's real render (Address Library 50882) is called by id. The flag recipe and the capture come from Modex - Mod Explorer Menu (Patchuli; issue #48 and its Item3DPreview), credited in THIRD_PARTY_NOTICES.md. While the box is showing the game is paused, as it is inside the inventory. The engine's own `bShowInventory3D` switch is turned on for the session if a player's INI has it off, and restored after.
