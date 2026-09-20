@@ -20,6 +20,8 @@ namespace Catalog
 		std::vector<Item>   g_items;
 		bool                g_built = false;
 
+		std::uint32_t g_generation = 0;
+
 		[[nodiscard]] std::string Lower(std::string_view a_in)
 		{
 			std::string out(a_in);
@@ -31,6 +33,36 @@ namespace Catalog
 		[[nodiscard]] bool Contains(std::string_view a_haystackLower, std::string_view a_needleLower)
 		{
 			return a_needleLower.empty() || a_haystackLower.find(a_needleLower) != std::string_view::npos;
+		}
+
+		// "You hold a pile of these" - the owner's own widening (2026-09-10). Potions, ingredients,
+		// scrolls, ammo and soul gems by kind, plus CRAFTING MATERIALS, which are Misc records and
+		// so cannot be told apart by kind alone: those are identified by the vanilla vendor keywords,
+		// read off the form rather than guessed from its name. Decided here, at build time, because
+		// HasKeywordString walks the form's keyword list comparing strings and the page would
+		// otherwise do it for every visible row on every frame.
+		[[nodiscard]] bool IsBulkItem(const Item& a_item)
+		{
+			switch (a_item.kind)
+			{
+			case Kind::kPotion:
+			case Kind::kIngredient:
+			case Kind::kScroll:
+			case Kind::kAmmo:
+			case Kind::kSoulGem:
+				return true;
+			default:
+				break;
+			}
+			if (const auto* kwf = a_item.form ? a_item.form->As<RE::BGSKeywordForm>() : nullptr)
+			{
+				for (const char* kw : { "VendorItemOreIngot", "VendorItemAnimalHide",
+										"VendorItemFirewood", "VendorItemGem" })
+				{
+					if (kwf->HasKeywordString(kw)) { return true; }
+				}
+			}
+			return false;
 		}
 
 		// Every form carries the file that FIRST defined it at index 0. That is the plugin a player
@@ -134,6 +166,13 @@ namespace Catalog
 					item.enchanted = false;
 				}
 
+				// The per-frame fields, computed once (see Catalog.h). Everything the page's
+				// filter and sort touch on the hot path is ready before it ever draws.
+				item.nameLower = Lower(item.name);
+				item.editorLower = Lower(item.editorID);
+				item.sortKeyLower = item.name.empty() ? item.editorLower : item.nameLower;
+				item.bulk = IsBulkItem(item);
+
 				g_items.push_back(std::move(item));
 				++added;
 			}
@@ -185,10 +224,11 @@ namespace Catalog
 	{
 		// Ties fall back to the name so the order is stable and reads sensibly - a value sort over
 		// three hundred items worth 0 gold is otherwise arbitrary noise.
+		// Compares the key that was lower-cased once at build time. This used to lower-case both
+		// names INSIDE the comparator, which is two heap allocations per comparison - about
+		// 2*N*log(N) of them for every sort, on every frame the page drew.
 		const auto byName = [](const Item* a, const Item* b) {
-			const std::string an = Lower(a->name.empty() ? a->editorID : a->name);
-			const std::string bn = Lower(b->name.empty() ? b->editorID : b->name);
-			return an < bn;
+			return a->sortKeyLower < b->sortKeyLower;
 		};
 
 		switch (a_sort)
@@ -353,6 +393,7 @@ namespace Catalog
 		for (const Plugin& p : g_plugins) { if (p.light) { ++light; } }
 
 		g_built = true;
+		++g_generation;   // every cached query result built against the old catalogue is now stale
 		std::size_t ench = 0;
 		for (const Item& i : g_items) { if (i.enchanted) { ++ench; } }
 
@@ -375,7 +416,7 @@ namespace Catalog
 			if (!a_showQuestItems && item.questItem) { continue; }
 			if (a_kindFilter && !a_kindFilter[static_cast<std::size_t>(item.kind)]) { continue; }
 			if (!needle.empty() &&
-				!Contains(Lower(item.name), needle) && !Contains(Lower(item.editorID), needle))
+				!Contains(item.nameLower, needle) && !Contains(item.editorLower, needle))
 			{
 				continue;
 			}
@@ -400,7 +441,7 @@ namespace Catalog
 			if (!a_showEnchanted && item.enchanted) { continue; }
 			if (!a_showQuestItems && item.questItem) { continue; }
 			if (a_kindFilter && !a_kindFilter[static_cast<std::size_t>(item.kind)]) { continue; }
-			if (!Contains(Lower(item.name), needle) && !Contains(Lower(item.editorID), needle)) { continue; }
+			if (!Contains(item.nameLower, needle) && !Contains(item.editorLower, needle)) { continue; }
 			out.push_back(&item);
 			if (a_limit && out.size() >= a_limit) { break; }
 		}
@@ -410,6 +451,95 @@ namespace Catalog
 		// page already tells the reader the list was cut short.
 		SortItems(out, a_sort);
 		return out;
+	}
+
+	std::uint32_t Generation() { return g_generation; }
+
+	namespace
+	{
+		// One remembered answer per query shape. The page asks the SAME question on every frame it
+		// draws - the search box has not changed, nor the filters, nor the sort - and the honest
+		// answer is the one from last frame. Recomputing it meant walking all 26,000 items and
+		// sorting the survivors sixty times a second for no new information, which is where most
+		// of the frame rate went while the page was open (phbd01, 2026-09-19).
+		struct QueryCache
+		{
+			bool                      valid = false;
+			std::uint32_t             generation = 0;
+			std::uint32_t             pluginIndex = 0;
+			std::string               search;
+			bool                      kinds[static_cast<std::size_t>(Kind::kCount)]{};
+			bool                      showEnchanted = false;
+			bool                      showQuestItems = false;
+			Sort                      sort = Sort::kNameAsc;
+			std::size_t               limit = 0;
+			std::vector<const Item*>  result;
+
+			[[nodiscard]] bool Matches(std::uint32_t a_plugin, std::string_view a_search,
+									   const bool* a_kinds, bool a_ench, bool a_quest,
+									   Sort a_sort, std::size_t a_limit) const
+			{
+				if (!valid || generation != g_generation) { return false; }
+				if (pluginIndex != a_plugin || search != a_search) { return false; }
+				if (showEnchanted != a_ench || showQuestItems != a_quest) { return false; }
+				if (sort != a_sort || limit != a_limit) { return false; }
+				if (a_kinds)
+				{
+					for (std::size_t i = 0; i < static_cast<std::size_t>(Kind::kCount); ++i)
+					{
+						if (kinds[i] != a_kinds[i]) { return false; }
+					}
+				}
+				return true;
+			}
+
+			void Remember(std::uint32_t a_plugin, std::string_view a_search, const bool* a_kinds,
+						  bool a_ench, bool a_quest, Sort a_sort, std::size_t a_limit,
+						  std::vector<const Item*>&& a_result)
+			{
+				valid = true;
+				generation = g_generation;
+				pluginIndex = a_plugin;
+				search.assign(a_search);
+				showEnchanted = a_ench;
+				showQuestItems = a_quest;
+				sort = a_sort;
+				limit = a_limit;
+				if (a_kinds)
+				{
+					for (std::size_t i = 0; i < static_cast<std::size_t>(Kind::kCount); ++i) { kinds[i] = a_kinds[i]; }
+				}
+				result = std::move(a_result);
+			}
+		};
+
+		QueryCache g_perPlugin;
+		QueryCache g_searchAll;
+	}
+
+	const std::vector<const Item*>& ItemsOfCached(std::uint32_t a_pluginIndex, std::string_view a_search,
+												  bool a_kindFilter[static_cast<std::size_t>(Kind::kCount)],
+												  bool a_showEnchanted, bool a_showQuestItems, Sort a_sort)
+	{
+		if (!g_perPlugin.Matches(a_pluginIndex, a_search, a_kindFilter, a_showEnchanted, a_showQuestItems, a_sort, 0))
+		{
+			g_perPlugin.Remember(a_pluginIndex, a_search, a_kindFilter, a_showEnchanted, a_showQuestItems, a_sort, 0,
+								 ItemsOf(a_pluginIndex, a_search, a_kindFilter, a_showEnchanted, a_showQuestItems, a_sort));
+		}
+		return g_perPlugin.result;
+	}
+
+	const std::vector<const Item*>& SearchAllCached(std::string_view a_search,
+													bool a_kindFilter[static_cast<std::size_t>(Kind::kCount)],
+													bool a_showEnchanted, bool a_showQuestItems, Sort a_sort,
+													std::size_t a_limit)
+	{
+		if (!g_searchAll.Matches(0, a_search, a_kindFilter, a_showEnchanted, a_showQuestItems, a_sort, a_limit))
+		{
+			g_searchAll.Remember(0, a_search, a_kindFilter, a_showEnchanted, a_showQuestItems, a_sort, a_limit,
+								 SearchAll(a_search, a_kindFilter, a_showEnchanted, a_showQuestItems, a_sort, a_limit));
+		}
+		return g_searchAll.result;
 	}
 
 	void GiveToPlayer(RE::TESForm* a_form, std::uint32_t a_count)

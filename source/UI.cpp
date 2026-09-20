@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdio>
 #include <string>
 #include <vector>
 
@@ -62,6 +63,32 @@ namespace UI
 		// both rebuild sites below clear it.
 		const Catalog::Item* g_previewItem = nullptr;
 
+		// After circle gives the sticks back, the highlight has to land on the row the player was
+		// handling - not on the list's own box (the owner, 2026-09-19: "the nav box will default to
+		// the nav box of the listed items not a specific item that you were selecting beforehand").
+		// Set when handling ends; consumed by the first row that matches, one frame later.
+		const Catalog::Item* g_refocusItem = nullptr;
+
+		// Set while the rows are drawn, resolved once afterwards: the mouse wins when it is over a
+		// row, the keyboard/controller highlight wins when it is not.
+		const Catalog::Item* g_hoverItem = nullptr;
+		const Catalog::Item* g_focusItem = nullptr;
+
+		// THE FIXED ITEM (the owner, 2026-09-19): "the mouse should select the list item which fixes
+		// the item to the preview and then they can zoom and rotate ... but rotate and zoom only on
+		// activating the item with a click". Two states, not one:
+		//   nothing fixed - the preview FOLLOWS the mouse, so you can see what you scroll past, and
+		//                   turning and zooming do nothing (there is nothing to take hold of);
+		//   fixed         - the clicked item stays in the pane whatever the mouse passes over, and
+		//                   the mouse and the sticks can handle it.
+		// Clicking another row moves the fix to that row; R3 on the pad does the same thing.
+		const Catalog::Item* g_fixedItem = nullptr;
+
+		// The Favourites page's save confirmation.
+		bool  g_favSaved = false;
+		float g_favSavedAt = 0.0F;
+		int   g_favSavedShow = 0;
+
 
 		constexpr int kStackMax = 50;      // consumables AND crafting materials
 		constexpr int kGoldMax  = 10000;
@@ -70,34 +97,10 @@ namespace UI
 		// from ordinary clutter - it is VendorItemClutter, same as a tin cup.
 		constexpr RE::FormID kGoldFormID = 0x0000000F;
 
-		// "Consumable" here follows the owner's own widening (2026-09-10): things you hold a pile of.
-		// Potions, ingredients, scrolls, ammo and soul gems by kind - and CRAFTING MATERIALS, which
-		// are Misc records and so cannot be told apart by kind alone. They are identified by the
-		// vanilla vendor keywords instead, read off the form rather than guessed from its name:
-		// VendorItemOreIngot covers ingots and ore, VendorItemAnimalHide covers leather and strips.
-		bool IsBulkItem(const Catalog::Item& a_item)
-		{
-			switch (a_item.kind)
-			{
-			case Catalog::Kind::kPotion:
-			case Catalog::Kind::kIngredient:
-			case Catalog::Kind::kScroll:
-			case Catalog::Kind::kAmmo:
-			case Catalog::Kind::kSoulGem:
-				return true;
-			default:
-				break;
-			}
-			if (const auto* kwf = a_item.form ? a_item.form->As<RE::BGSKeywordForm>() : nullptr)
-			{
-				for (const char* kw : { "VendorItemOreIngot", "VendorItemAnimalHide",
-										"VendorItemFirewood", "VendorItemGem" })
-				{
-					if (kwf->HasKeywordString(kw)) { return true; }
-				}
-			}
-			return false;
-		}
+		// "Consumable" - things you hold a pile of - is decided ONCE when the catalogue is built
+		// (Catalog::Item::bulk). It used to be worked out here, per row, per frame: for a crafting
+		// material that means walking the form's keyword list comparing four strings, on every
+		// visible row, sixty times a second.
 
 		[[nodiscard]] bool IsGold(const Catalog::Item& a_item)
 		{
@@ -143,6 +146,8 @@ namespace UI
 			"igPushItemWidth", "igPopItemWidth", "igPushID_Str", "igPopID",
 			// the hand-drawn Toggle (rule 32 - a boolean is a switch, never a tick-box)
 			"igGetCursorScreenPos", "igGetWindowDrawList", "igGetFrameHeight",
+			// 1.1.1: the name is a Selectable that spans the row, placed by hand
+			"igGetContentRegionAvail", "igGetCursorPosX",
 			"igInvisibleButton", "igIsItemHovered",
 			"ImDrawList_AddRectFilled", "ImDrawList_AddCircleFilled",
 			// the 3D preview's floating box: its frame, caption and picture are drawn on the framework's
@@ -154,6 +159,9 @@ namespace UI
 			// 1.0.7: the 3D preview pane is an image of the engine's own render, and the row under
 			// the cursor OR under D-pad focus is what it shows.
 			"igIsItemFocused", "ImDrawList_AddImage", "igCalcTextSize",
+			// 1.1.1: R3 takes hold of the previewed item and circle lets go.
+			"igIsKeyPressed_Bool",
+			"igSetKeyboardFocusHere",
 			"igBeginTable", "igEndTable", "igTableNextColumn"
 		};
 
@@ -245,7 +253,46 @@ namespace UI
 		// previewed one. Called after each of a row's controls, so any of them counts.
 		void NoteRow(const Catalog::Item& a_item)
 		{
-			if (ImGuiMCP::IsItemHovered() || ImGuiMCP::IsItemFocused()) { g_previewItem = &a_item; }
+			// The row the player was handling takes the highlight back, on the frame after circle.
+			if (g_refocusItem == &a_item)
+			{
+				ImGuiMCP::SetKeyboardFocusHere(-1);
+				g_refocusItem = nullptr;
+			}
+			// HOVER BEATS FOCUS, AND ONLY ONE OF THEM WINS PER FRAME (2026-09-19).
+			//
+			// This used to set the previewed item when a row was hovered OR focused, with no
+			// precedence - so the controller's focus (which stays where it was left) and the mouse's
+			// hover both claimed it every frame and whichever row was drawn last won. Clicking a row
+			// with the mouse therefore did nothing: the preview snapped back to whatever the D-pad
+			// had last selected (the owner, 2026-09-19: "it just goes back to whatever I last
+			// selected with controller"). Worse, the two fought frame by frame, so the requested
+			// item CHANGED every frame - which unloads and reloads the engine's model continuously
+			// and never lets a capture finish, which is why items "appear for an instant and then
+			// they're gone".
+			//
+			// The rule now: if the mouse is over any row this frame, the mouse decides; otherwise
+			// the highlight does. Recorded per frame and applied after the list is drawn.
+			if (ImGuiMCP::IsItemHovered())
+			{
+				g_hoverItem = &a_item;
+				// A click anywhere on the row fixes it - the Add button, the star, the name. The
+				// button's own action still happens; fixing is in addition to it, not instead.
+				if (auto* io = ImGuiMCP::GetIO(); io && io->MouseClicked[0]) { g_fixedItem = &a_item; }
+			}
+			else if (ImGuiMCP::IsItemFocused() && g_focusItem == nullptr) { g_focusItem = &a_item; }
+
+			// R3 ON THE HIGHLIGHTED ROW hands the preview box the sticks (the owner, 2026-09-19).
+			// Asked of the row that has the highlight, so the item being handled is the one the
+			// player was looking at - and while the box has the sticks the highlight cannot move,
+			// so it is still on this row when circle gives them back.
+			if (ImGuiMCP::IsItemFocused() && !preview::Handling() &&
+				ImGuiMCP::IsKeyPressed(ImGuiMCP::ImGuiKey_GamepadR3, false))
+			{
+				g_previewItem = &a_item;
+				g_fixedItem = &a_item;   // R3 is the controller's "click": it fixes the item too
+				preview::BeginHandling();
+			}
 		}
 
 		// The floating preview box: the heartbeat that keeps the helper menu open, the request for
@@ -253,9 +300,39 @@ namespace UI
 		// call at the end of each page's render.
 		void DrawPreviewFloating()
 		{
-			if (!settings::general::show3DPreview || !preview::Available()) { return; }
+			// One winner for the frame. Doing this here, after the rows, is what stops the request
+			// changing several times within a single frame.
+			if (g_fixedItem) { g_previewItem = g_fixedItem; }
+			else if (g_hoverItem) { g_previewItem = g_hoverItem; }
+			else if (g_focusItem) { g_previewItem = g_focusItem; }
+			g_hoverItem = nullptr;
+			g_focusItem = nullptr;
+
+			if (!settings::general::show3DPreview || !preview::Available())
+			{
+				// The box is gone; it cannot still be holding the pad.
+				preview::EndHandling();
+				return;
+			}
 			float x0 = 0.0F, y0 = 0.0F, x1 = 0.0F, y1 = 0.0F;
 			if (!preview::PaneRect(x0, y0, x1, y1)) { return; }
+			// The box takes the mouse before anything is drawn, so a turn or a zoom asked for this
+			// frame is already in the capture this frame produces.
+			// Turning and zooming need a FIXED item. While the preview is merely following the
+			// mouse there is nothing to take hold of, and letting the wheel zoom a preview that is
+			// about to change under it reads as the controls being broken.
+			if (g_fixedItem) { preview::HandleMouse(x0, y0, x1, y1); }
+			// The controller's turn at the box: the sticks while it has them, circle to give them
+			// back and go on navigating the list from the row the highlight never left.
+			if (preview::Handling())
+			{
+				preview::HandleController();
+				if (ImGuiMCP::IsKeyPressed(ImGuiMCP::ImGuiKey_GamepadFaceRight, false))
+				{
+					preview::EndHandling();
+					g_refocusItem = g_previewItem;   // put the highlight back where it was
+				}
+			}
 			preview::Heartbeat();
 			preview::Request(g_previewItem && g_previewItem->form ? g_previewItem->form : nullptr, x1 - x0, y1 - y0);
 			const char* title = nullptr;
@@ -274,20 +351,29 @@ namespace UI
 			ImGuiMCP::SliderFloat(strings::TR("AIE_PreviewY", "Pane down"), &settings::preview::paneY, 0.05F, 0.95F, "%.2f", 0);
 			ImGuiMCP::SliderFloat(strings::TR("AIE_PreviewSize", "Pane size"), &settings::preview::paneSize, 0.08F, 0.90F, "%.2f", 0);
 			ImGuiMCP::PopItemWidth();
+			ImGuiMCP::TextDisabled("%s", strings::TR("AIE_PreviewMouseHint",
+								   "Click an item in the list to fix it here - then hold the left mouse button on it to turn it, and scroll the wheel to zoom. Without a click the preview just follows the mouse."));
+			ImGuiMCP::TextDisabled("%s", strings::TR("AIE_PreviewPadHint",
+								   "Controller: press R3 on an item to take hold of it - the left stick turns it, the right "
+								   "stick zooms, and circle lets go and puts you back on the list."));
 		}
 
 		void DrawItemRow(const Catalog::Item& a_item, bool a_showPlugin)
 		{
 			// The form ID makes every row's widgets unique; without it ImGui merges buttons that
 			// share a label and clicking one adds a different item.
-			const std::string id = std::to_string(a_item.formID);
-			ImGuiMCP::PushID(id.c_str());
+		// A fixed buffer rather than std::to_string: this runs for every visible row on every
+		// frame, and the id only has to be unique, not pretty.
+		char id[16];
+		std::snprintf(id, sizeof(id), "%u", a_item.formID);
+		ImGuiMCP::PushID(id);
+
 
 			// How many this row will actually hand over. Gold uses its own amount; a consumable or
 			// crafting material uses the slider; anything else is a single item, because fifty
 			// cuirasses is never what was meant.
 			const bool  gold    = IsGold(a_item);
-			const bool  bulk    = IsBulkItem(a_item);
+			const bool  bulk    = a_item.bulk;
 			const int   rowMax  = gold ? kGoldMax : (bulk ? kStackMax : 1);
 			const int   rowWant = gold ? g_goldCount : (bulk ? g_addCount : 1);
 
@@ -328,20 +414,34 @@ namespace UI
 											   : strings::TR("AIE_FavAddTip", "Add to favourites"));
 			}
 
+			// THE NAME IS A CONTROL, NOT TEXT (the owner, 2026-09-20). It spans the rest of the row, so a
+			// click anywhere right of the star - on the name or on the grey details drawn over it - lands
+			// on this Selectable. Activating it, by mouse or by the controller's A, FIXES the item in the
+			// preview; that is the whole gesture, with nothing to learn.
 			ImGuiMCP::SameLine();
-			ImGuiMCP::Text("%s", a_item.name.empty() ? a_item.editorID.c_str() : a_item.name.c_str());
+			const char* nameText = a_item.name.empty() ? a_item.editorID.c_str() : a_item.name.c_str();
+			const float nameStartX = ImGuiMCP::GetCursorPosX();
+			const float rowWidth = ImGuiMCP::GetContentRegionAvail().x;
+			if (ImGuiMCP::Selectable(nameText, g_previewItem == &a_item, 0,
+									 ImGuiMCP::ImVec2(rowWidth > 0.0F ? rowWidth : 0.0F, 0.0F)))
+			{
+				g_fixedItem = &a_item;
+			}
 			NoteRow(a_item);
+			// The details go back onto the same line, over the Selectable's band: plain text adds no item
+			// id, so the Selectable underneath keeps the hover and the click.
+			const float detailX = nameStartX + ImGuiMCP::CalcTextSize(nameText).x + 14.0F;
+			ImGuiMCP::SameLine(detailX);
 
 			// A quest item is called out wherever it appears, whether or not they are being hidden -
 			// handing yourself one can confuse the quest that owns it, and that is worth knowing
 			// before you press Add rather than afterwards.
 			if (a_item.questItem)
 			{
-				ImGuiMCP::SameLine();
 				ImGuiMCP::TextDisabled("%s", strings::TR("AIE_QuestTag", "[quest]"));
+				ImGuiMCP::SameLine();
 			}
 
-			ImGuiMCP::SameLine();
 			if (a_showPlugin)
 			{
 				const auto& plugins = Catalog::Plugins();
@@ -395,6 +495,8 @@ namespace UI
 			{
 				const std::size_t n = Catalog::Build();
 				g_previewItem = nullptr;
+				g_fixedItem = nullptr;
+				g_refocusItem = nullptr;
 				g_status = std::to_string(n) + " " +
 						   strings::TR("AIE_ItemsFound", "items found");
 			}
@@ -417,6 +519,8 @@ namespace UI
 			Catalog::Build();
 			g_selectedPlugin = -1;
 			g_previewItem = nullptr;
+			g_fixedItem = nullptr;
+			g_refocusItem = nullptr;
 		}
 
 		ImGuiMCP::Spacing();
@@ -449,7 +553,8 @@ namespace UI
 			ImGuiMCP::InputText("##search_all", g_itemSearch, sizeof(g_itemSearch));
 			ImGuiMCP::PopItemWidth();
 
-			const auto hits = Catalog::SearchAll(g_itemSearch, g_kind, g_showEnchanted,
+			// Memoised: the same question every frame until the player types or flips a switch.
+			const auto& hits = Catalog::SearchAllCached(g_itemSearch, g_kind, g_showEnchanted,
 												 settings::general::showQuestItems,
 												 static_cast<Catalog::Sort>(settings::general::sortMode),
 												 kSearchLimit);
@@ -498,6 +603,7 @@ namespace UI
 		std::transform(filterLower.begin(), filterLower.end(), filterLower.begin(),
 					   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 
+		static std::string s_nameLower;
 		if (ImGuiMCP::BeginChild("aie_plugins", ImGuiMCP::ImVec2(320.0F, 420.0F), 1))
 		{
 			for (std::size_t i = 0; i < plugins.size(); ++i)
@@ -505,10 +611,12 @@ namespace UI
 				const auto& p = plugins[i];
 				if (!filterLower.empty())
 				{
-					std::string nameLower = p.fileName;
-					std::transform(nameLower.begin(), nameLower.end(), nameLower.begin(),
+					// Lower-cased into a REUSED buffer rather than a fresh string per plugin per
+					// frame - a couple of hundred allocations a frame for a filter usually empty.
+					s_nameLower.assign(p.fileName);
+					std::transform(s_nameLower.begin(), s_nameLower.end(), s_nameLower.begin(),
 								   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-					if (nameLower.find(filterLower) == std::string::npos) { continue; }
+					if (s_nameLower.find(filterLower) == std::string::npos) { continue; }
 				}
 				if (p.itemCount == 0) { continue; }
 
@@ -533,7 +641,9 @@ namespace UI
 			}
 			else
 			{
-				const auto items = Catalog::ItemsOf(static_cast<std::uint32_t>(g_selectedPlugin),
+				// Memoised - see the note on the search above. Selecting Skyrim.esm put twenty
+				// thousand items through a filter and a sort on every frame the page drew.
+				const auto& items = Catalog::ItemsOfCached(static_cast<std::uint32_t>(g_selectedPlugin),
 													g_itemSearch, g_kind, g_showEnchanted,
 													settings::general::showQuestItems,
 													static_cast<Catalog::Sort>(settings::general::sortMode));
@@ -584,6 +694,27 @@ namespace UI
 		}
 
 		ImGuiMCP::TextDisabled("%s: %d", strings::TR("AIE_FavCount", "Saved"), static_cast<int>(all.size()));
+
+		// Save, beside the count. Every star already writes the file the moment it is pressed, so
+		// this changes nothing mechanically - it is the reassurance that the list on screen is the
+		// list on disk (the owner, 2026-09-19), and the same control the framework's own menu-list
+		// page carries for the same reason.
+		ImGuiMCP::SameLine();
+		if (ImGuiMCP::Button(strings::TR("AIE_FavSave", "Save favourites")))
+		{
+			g_favSaved = favourites::Save();
+			g_favSavedAt = ImGuiMCP::GetIO() ? ImGuiMCP::GetIO()->DeltaTime : 0.0F;
+			g_favSavedShow = 180;   // about three seconds at 60 fps
+		}
+		if (g_favSavedShow > 0)
+		{
+			--g_favSavedShow;
+			ImGuiMCP::SameLine();
+			ImGuiMCP::TextDisabled("%s", g_favSaved ? strings::TR("AIE_FavSaved", "saved")
+													: strings::TR("AIE_FavSaveFailed", "could not be written - see the log"));
+		}
+		ImGuiMCP::SameLine();
+		ImGuiMCP::TextDisabled("%s", strings::TR("AIE_FavWhere", "kept in Documents/My Games/Skyrim Special Edition/SKSE/, per plugin, so they survive a load-order change"));
 
 		ImGuiMCP::SameLine();
 		if (ImGuiMCP::Button(strings::TR("AIE_FavClear", "Clear all")))

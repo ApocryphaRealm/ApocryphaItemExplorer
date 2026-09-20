@@ -37,9 +37,9 @@ namespace settings
 	{
 		// The box, in fractions of the screen: its centre, then its height (the box is square). It is
 		// drawn in FRONT of the framework window, on the foreground list, so it can sit anywhere.
-		inline float paneX = 0.80F;        // fPaneX:Preview
-		inline float paneY = 0.50F;        // fPaneY:Preview
-		inline float paneSize = 0.28F;     // fPaneSize:Preview
+		inline float paneX = 0.87F;        // fPaneX:Preview
+		inline float paneY = 0.64F;        // fPaneY:Preview
+		inline float paneSize = 0.44F;     // fPaneSize:Preview
 		// The corner brackets and the item-name caption above the box.
 		inline float modelScale = 1.0F;    // fModelScale:Preview - 1 = as the game draws it; 0.5 = half
 		inline float offsetX = 0.0F;       // fOffsetX:Preview - nudge the model in the pane, pixels

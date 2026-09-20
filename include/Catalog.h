@@ -60,6 +60,21 @@ namespace Catalog
 		// Spawning one of these can confuse the quest that owns it, so the page says so and can
 		// hide them entirely.
 		bool          questItem;
+
+		// ---- decided ONCE at build time, because the page needs them EVERY FRAME ----------
+		// The page rebuilds its filtered, sorted list on every frame it draws. Lower-casing a
+		// name inside that loop meant two heap allocations per item per frame, and the sort's
+		// tie-breaker allocated two more per comparison - on a 26,000-item load order with a
+		// large plugin selected that is hundreds of thousands of allocations a frame, and it
+		// cost most of the frame rate while the page was open (phbd01, 2026-09-19: "I get a huge
+		// FPS drop - around 80%"). Lower-cased once here, the same work is free.
+		std::string   nameLower;     // name, lower case
+		std::string   editorLower;   // editorID, lower case
+		std::string   sortKeyLower;  // (name, else editorID) lower case - what every sort orders by
+		// "You hold a pile of these": potions, ingredients, scrolls, ammo, soul gems, and crafting
+		// materials identified by their vendor keywords. The keyword lookups are four string
+		// compares against the form's keyword list, which is why they are not done per row.
+		bool          bulk;
 	};
 
 	// How a list is ordered. The catalogue's own order is the order forms happen to sit in the
@@ -84,6 +99,10 @@ namespace Catalog
 		std::uint32_t index;       // load index, or the light index for an ESL
 		std::uint32_t itemCount;
 	};
+
+	// Bumped by every Build(). A cached query result is only still valid if it was computed
+	// against the same generation.
+	[[nodiscard]] std::uint32_t Generation();
 
 	// Build (or rebuild) the catalogue from the current load order. Safe to call again; the second
 	// call throws the first away. Returns the number of items found.
@@ -110,6 +129,24 @@ namespace Catalog
 													 bool a_showQuestItems,
 													 Sort a_sort,
 													 std::size_t a_limit);
+
+	// The two queries above, MEMOISED. The page calls one of these every frame with the same
+	// arguments until the player types or flips a switch, so the answer is computed once and the
+	// reference handed back until an input actually changes. The returned reference stays valid
+	// until the next call with different arguments (or the next Build).
+	[[nodiscard]] const std::vector<const Item*>& ItemsOfCached(std::uint32_t a_pluginIndex,
+																std::string_view a_search,
+																bool a_kindFilter[static_cast<std::size_t>(Kind::kCount)],
+																bool a_showEnchanted,
+																bool a_showQuestItems,
+																Sort a_sort);
+
+	[[nodiscard]] const std::vector<const Item*>& SearchAllCached(std::string_view a_search,
+																  bool a_kindFilter[static_cast<std::size_t>(Kind::kCount)],
+																  bool a_showEnchanted,
+																  bool a_showQuestItems,
+																  Sort a_sort,
+																  std::size_t a_limit);
 
 	// Orders a list that has already been gathered. Used by the Favourites page, which builds its
 	// list from saved form IDs rather than by filtering the catalogue.

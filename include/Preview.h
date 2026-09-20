@@ -66,6 +66,33 @@ namespace preview
 	void DrawFloating(const char* a_title);
 
 	// The box in display pixels, from the settings. False before the framework has drawn a frame.
+	// THE BOX TAKES THE MOUSE (the owner, 2026-09-19: "the user can use their mouse to select the
+	// item in the 3D rendering frame and move it around or zoom in by scrolling the wheel").
+	// Called once a frame by the page with the box's own rectangle:
+	//   left-drag   turns the model, the way the inventory turns one
+	//   right-drag  moves it inside the box
+	//   wheel       zooms, by changing how much of the game's render is lifted into the box
+	// The box is drawn on the framework's foreground list rather than inside a window, so there is
+	// no ImGui item to ask about hovering - the pointer is tested against the rectangle directly.
+	void HandleMouse(float a_x0, float a_y0, float a_x1, float a_y1);
+
+	// THE CONTROLLER (the owner, 2026-09-19: "controller should have press r3 while on the list item
+	// to activate the preview pane and start manipulating the item with left and right stick and
+	// circle to exit and go back to the list item").
+	//
+	// R3 on a highlighted row hands the box the sticks; while it has them the LEFT stick turns the
+	// item and the RIGHT stick zooms, and neither moves the selection. Circle (B) gives them back
+	// and puts the highlight where it was. The sticks come from the framework - it normally
+	// collapses both onto one navigation axis, so a page cannot read them apart without asking.
+	[[nodiscard]] bool Handling();     // the box has the sticks right now
+	void BeginHandling();              // R3 was pressed on a row
+	void EndHandling();                // circle, or the page went away
+	void HandleController();           // once a frame while Handling(); drives turn and zoom
+
+	// The turn the player has dragged the model to, in radians, and whether it is anything but
+	// upright. Reset whenever the previewed item changes, so a new item is never shown face-down.
+	void ResetOrientation();
+
 	[[nodiscard]] bool PaneRect(float& a_x0, float& a_y0, float& a_x1, float& a_y1);
 
 	// ---- Called from the HELPER MENU (main thread, the game's own menu pass) --------------------

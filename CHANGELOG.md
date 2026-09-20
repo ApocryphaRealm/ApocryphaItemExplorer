@@ -1,5 +1,96 @@
 # Changelog
 
+## 1.1.1 - 2026-09-19 - untested
+
+### Fixed
+- **The whole row answers the mouse.** The owner, 2026-09-19: *"Whenever I use the left click of the mouse to select
+  an item to preview in the preview pane, it doesn't do anything."* Most of a row is plain text, and text is not a
+  control, so a click on an item's NAME was claimed by nothing and reached the framework's window, which started
+  dragging it. The row's rectangle is now tested against the cursor at the end of each row: hovering anywhere in it
+  previews the item, clicking anywhere in it fixes the item. It adds no stop for the controller's highlight to walk
+  through, so controller navigation is unchanged. (Apocrypha Menu Framework 1.9.6 is the other half of this: its
+  window now moves only by its top bar, which is what was eating the click.)
+- **The preview pane was empty and the item was drawn in the inventory's own preview spot instead.** The owner,
+  2026-09-19: *"The items don't appear in our preview window at all and are using the preview window that's in the
+  inventory itself."* The previous attempt bound our own render target and let the engine paint into it. That cannot
+  work: `Inventory3DManager::Render` sets up its own targets through BSGraphics before it draws, so the redirect was
+  simply overridden - the model went to the live frame at its usual place, and our texture stayed blank.
+
+  The capture is back to the way Modex does it, and the way this mod did it before: save the frame, blank it, let the
+  engine paint, lift the result into our texture, put the saved frame back. The player's frame ends byte-identical to
+  the one that would have been drawn.
+
+  The one change from the older version is the rectangle: it is now the WHOLE SCREEN rather than a computed box.
+  Every leak this preview has had came from a box that did not cover what the model painted - it shrank with zoom,
+  then it was clamped to a 2048-pixel texture while the model kept painting past the clamp. A full-frame copy cannot
+  be too small. It costs three screen-sized copies on the frames where a capture actually happens, which is a handful
+  after each change of item or turn of the model, not every frame.
+- A frame whose size or format does not match the capture textures now rebuilds them and says so in the log, instead
+  of a copy being silently refused and the pane staying empty.
+
+### Fixed
+- **A second copy of the model appearing on screen, and a smear left behind while turning it.** The owner, 2026-09-19,
+  spinning a weapon zoomed right in: *"a second preview appears in the bottom middle of the screen that's also
+  rotating"*, *"spinning the weapon would cause the texture to sort of leave a, a line of texture like a pencil on
+  paper"*, and his own reading, which was correct: *"it seems like there's two areas inside the preview pane and When
+  the item intersects both planes, it tears the texture."*
+
+  The preview does not render the model anywhere private - it lets the engine paint it onto the live frame and works
+  a rectangle around it: save the pixels under the rectangle, clear it, let the engine paint, lift the rectangle into
+  a texture, put the saved pixels back. Zoom was implemented by SHRINKING that rectangle, so that a smaller piece of
+  the screen was lifted into the same pane. Zoom in far enough and the rectangle becomes smaller than the area the
+  engine actually paints, and everything outside it is never captured, never cleared and never restored - it is simply
+  left on the live frame. The two "planes" were the model's real painted extent and the capture rectangle.
+
+  The rectangle now depends only on the pane, so it always contains what is painted, and **zoom is applied to the
+  model's own scale instead** - a bigger model fills more of a rectangle that still holds it. Nothing can fall outside
+  the rectangle any more, because the rectangle is no longer what zoom moves.
+
+  Researched before it was rebuilt, and worth recording: the capture pipeline came from Modex originally, but Modex's
+  current source contains no `Inventory3DManager` at all - every one of its 63 source files was checked. The reference
+  was always its issue #48, a discussion, not shipped code, so there was nothing left to copy and the fix comes from
+  the diagnosis instead.
+
+### Added
+- **The 3D preview box takes the mouse** (the owner, 2026-09-19: *"you hold left mouse button while on the item
+  and it rotates 360 and theres no need to move its position in the frame but i want the scroll wheel to zoom in
+  and out"*). Hold the LEFT mouse button on the item and drag to turn it - across turns it, up and down tilts it,
+  and the turn never wraps or stops, so it goes round as many times as you keep dragging. The WHEEL zooms in and
+  out. A turn that started in the box keeps the mouse until the button comes up, so the model does not stop
+  turning when the pointer leaves the frame. The turn is applied to the model before the capture rectangle is
+  measured, so the box still frames it correctly at any angle, and a new item always starts upright. Zoom changes
+  how much of the screen is lifted into the box rather than re-rendering at another size, so it costs nothing.
+- **The controller takes hold of the item with R3** (the owner, 2026-09-19: *"controller should have press r3 while
+  on the list item to activate the preview pane and start manipulating the item with left and right stick and circle
+  to exit and go back to the list item"*). Press R3 on a highlighted row and the preview box takes the sticks: the
+  LEFT stick turns the item, the RIGHT stick zooms, and neither moves the selection, so the highlight is still on
+  that row when CIRCLE gives the sticks back. Turn and zoom speeds are per second rather than per frame, so they
+  feel the same whatever the frame rate is doing. Needs Apocrypha Menu Framework 1.9.5, which is where the sticks
+  come from; on an older framework the calls are absent, R3 does nothing and the mouse half is unaffected.
+- **The box's shipped position and size are now the owner's own** - `fPaneX = 0.87`, `fPaneY = 0.64`,
+  `fPaneSize = 0.44` - in the compiled defaults and in the shipped INI together (rule 16).
+
+### Performance
+- **The page no longer costs most of the frame rate while it is open.** phbd01 (2026-09-19, Nexus):
+  *"every time I install it and open the Item Explorer, I get a huge FPS drop - around 80%. This has never
+  happened with any other add-item mods I've used."* Four things were being redone on every single frame the
+  page drew, none of which could have changed since the frame before:
+  - **The sort lower-cased both names inside its comparator** - two heap allocations per comparison, so about
+    2*N*log(N) of them per sort. Selecting Skyrim.esm put roughly twenty thousand items through that every frame.
+  - **The filters lower-cased every item's name and editor ID** while walking the catalogue - about 52,000
+    string allocations per frame across a 26,000-item load order.
+  - **"Is this a stack item?" walked each visible row's keyword list**, comparing four keyword strings, per row,
+    per frame.
+  - **The 3D preview re-rendered the model and copied the capture rectangle three times per frame** (save the
+    world pixels, lift the model, put the world back) plus a full-rect clear - tens of megabytes of GPU copies
+    a frame at 4K, for a picture identical to the last one.
+
+  Names and the stack-item answer are now worked out once when the catalogue is read; both list queries are
+  memoised against their inputs and recomputed only when the search text, the filters, the sort or the selected
+  plugin actually change; and the preview captures only when the picture would differ - a different item, pane
+  size, model scale or background - with a two-second budget so a slow model load still ends in an image.
+  Nothing about what the page shows changed.
+
 ## 1.1.0 - 2026-09-18 - untested
 
 ### Fixed
