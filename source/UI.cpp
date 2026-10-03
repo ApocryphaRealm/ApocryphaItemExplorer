@@ -54,6 +54,12 @@ namespace UI
 		char        g_pluginFilter[128] = {};
 		char        g_itemSearch[128] = {};
 		int         g_selectedPlugin = -1;
+		// The selected plugin by NAME, so a rebuild (the "Show items with no name" switch, or the DevBench tool's
+		// op=build / op=set) that adds or drops plugins keeps the same plugin selected rather than whatever now
+		// sits at the old index.
+		std::string g_selectedPluginName;
+		// Set by the "Show items with no name" switch; the page re-reads the catalogue once the filters are drawn.
+		bool        g_unnamedChanged = false;
 		// How many of each pile to add, one amount per item (2026-10-02: a slider on every row you hold a pile of, on
 		// Browse AND Favourites, instead of one "How many" at the top of Browse). Kept for the session.
 		std::unordered_map<RE::FormID, int> g_rowCount;
@@ -240,6 +246,17 @@ namespace UI
 			ImGuiMCP::TextDisabled("%s", strings::TR("AIE_QuestHint",
 								   "items a quest calls its own - always tagged [quest] when shown"));
 
+			// Items with no in-game name (binggo123, 2026-09-29: EldenSkyrim.esp's weapons were not listed). Saved to
+			// the INI at once, and the catalogue is re-read with them in or out - see ExplorerPanel::Render.
+			if (ImGuiMCP::Toggle(strings::TR("AIE_ShowNoName", "Show items with no name"),
+								 &settings::general::showUnnamed))
+			{
+				g_unnamedChanged = true;
+			}
+			ImGuiMCP::SameLine();
+			ImGuiMCP::TextDisabled("%s", strings::TR("AIE_NoNameHint",
+								   "items with only an editor ID, read from the plugin file - tagged (no name)"));
+
 			ImGuiMCP::Spacing();
 			if (ImGuiMCP::Button(strings::TR("AIE_All", "All")))
 			{
@@ -249,6 +266,33 @@ namespace UI
 			if (ImGuiMCP::Button(strings::TR("AIE_None", "None")))
 			{
 				for (bool& b : g_kind) { b = false; }
+			}
+		}
+
+		// Every pointer this page keeps into the catalogue dies with a rebuild - and a rebuild can come from the page
+		// itself or from the DevBench tool's thread. Called at the top of each page's render and right after the page
+		// rebuilds, so no row, preview or highlight ever points into a catalogue that is gone.
+		void SyncWithCatalogue()
+		{
+			static std::uint32_t s_generation = 0;
+			const std::uint32_t now = Catalog::Generation();
+			if (now == s_generation) { return; }
+			s_generation = now;
+
+			g_previewItem = nullptr;
+			g_fixedItem = nullptr;
+			g_refocusItem = nullptr;
+			g_hoverItem = nullptr;
+			g_focusItem = nullptr;
+
+			g_selectedPlugin = -1;
+			if (!g_selectedPluginName.empty())
+			{
+				const auto& plugins = Catalog::Plugins();
+				for (std::size_t i = 0; i < plugins.size(); ++i)
+				{
+					if (plugins[i].fileName == g_selectedPluginName) { g_selectedPlugin = static_cast<int>(i); break; }
+				}
 			}
 		}
 
@@ -462,6 +506,12 @@ namespace UI
 				ImGuiMCP::TextDisabled("%s", strings::TR("AIE_QuestTag", "[quest]"));
 				ImGuiMCP::SameLine();
 			}
+			// No in-game name: the row is showing the editor ID instead, and says so.
+			if (a_item.name.empty())
+			{
+				ImGuiMCP::TextDisabled("%s", strings::TR("AIE_NoNameTag", "(no name)"));
+				ImGuiMCP::SameLine();
+			}
 
 			if (a_showPlugin)
 			{
@@ -505,6 +555,7 @@ namespace UI
 	{
 		strings::Tick();
 		InitKinds();
+		SyncWithCatalogue();
 
 		if (!Catalog::Built())
 		{
@@ -515,9 +566,7 @@ namespace UI
 			if (ImGuiMCP::Button(strings::TR("AIE_Build", "Read the load order")))
 			{
 				const std::size_t n = Catalog::Build();
-				g_previewItem = nullptr;
-				g_fixedItem = nullptr;
-				g_refocusItem = nullptr;
+				SyncWithCatalogue();
 				g_status = std::to_string(n) + " " +
 						   strings::TR("AIE_ItemsFound", "items found");
 			}
@@ -537,11 +586,9 @@ namespace UI
 		ImGuiMCP::SameLine();
 		if (ImGuiMCP::Button(strings::TR("AIE_Rebuild", "Re-read")))
 		{
+			g_selectedPluginName.clear();
 			Catalog::Build();
-			g_selectedPlugin = -1;
-			g_previewItem = nullptr;
-			g_fixedItem = nullptr;
-			g_refocusItem = nullptr;
+			SyncWithCatalogue();
 		}
 
 		ImGuiMCP::Spacing();
@@ -553,6 +600,18 @@ namespace UI
 							   "off hides every \"of Cold\" style variant, leaving the base equipment"));
 
 		DrawKindFilters();
+		if (g_unnamedChanged)
+		{
+			// The switch decides what the catalogue HOLDS, so it is applied by re-reading it - here, between the
+			// filters and the lists, so nothing drawn this frame uses the old one. Saved first, so the choice survives
+			// a restart (rule 16).
+			g_unnamedChanged = false;
+			const bool saved = settings::Save();
+			logger::info("page: Show items with no name {} (saved to the INI: {}) - re-reading the catalogue",
+						 settings::general::showUnnamed ? "on" : "off", saved ? "yes" : "no");
+			Catalog::Build();
+			SyncWithCatalogue();
+		}
 		ImGuiMCP::Spacing();
 		DrawPreviewSettings();
 		ImGuiMCP::Spacing();
@@ -631,13 +690,16 @@ namespace UI
 								   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 					if (s_nameLower.find(filterLower) == std::string::npos) { continue; }
 				}
-				if (p.itemCount == 0) { continue; }
+				// A plugin whose only items have no name stays in the list while they are hidden, so its view can say
+				// why it shows nothing (EldenSkyrim.esp-like mods would otherwise vanish from the page altogether).
+				if (p.itemCount == 0 && p.namelessFound == p.namelessListed) { continue; }
 
 				const std::string label = p.fileName + "  (" + std::to_string(p.itemCount) + ")" +
 										  (p.light ? "  [ESL]" : "") + "##p" + std::to_string(i);
 				if (ImGuiMCP::Selectable(label.c_str(), g_selectedPlugin == static_cast<int>(i)))
 				{
 					g_selectedPlugin = static_cast<int>(i);
+					g_selectedPluginName = p.fileName;
 				}
 			}
 		}
@@ -663,6 +725,19 @@ namespace UI
 				ImGuiMCP::TextDisabled("%s - %d %s", plugins[g_selectedPlugin].fileName.c_str(),
 									   static_cast<int>(items.size()), strings::TR("AIE_Shown", "shown"));
 
+				// Nobody is left wondering where a mod's items went: with the switch off, say how many nameless items
+				// this plugin has and how to list them. Counted during the build - no file is read for this.
+				const auto& sel = plugins[g_selectedPlugin];
+				if (!settings::general::showUnnamed && sel.namelessFound > sel.namelessListed)
+				{
+					char hidden[512];
+					std::snprintf(hidden, sizeof(hidden),
+								  strings::TR("AIE_NoNameHidden",
+											  "%d items here have no name and are hidden - turn on Show items with no name to list them"),
+								  static_cast<int>(sel.namelessFound - sel.namelessListed));
+					ImGuiMCP::TextDisabled("%s", hidden);
+				}
+
 				for (const auto* item : items) { DrawItemRow(*item, false); }
 			}
 		}
@@ -683,6 +758,7 @@ namespace UI
 	void __stdcall FavouritesPanel::Render()
 	{
 		strings::Tick();
+		SyncWithCatalogue();
 
 		ImGuiMCP::Text("%s", strings::TR("AIE_FavTitle", "Favourites"));
 		ImGuiMCP::Separator();

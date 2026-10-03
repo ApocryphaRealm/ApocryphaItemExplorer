@@ -44,7 +44,7 @@ namespace Catalog
 	{
 		RE::TESForm*  form;
 		std::string   name;        // what the player would see
-		std::string   editorID;    // useful when a form has no name
+		std::string   editorID;    // useful when a form has no name - from memory, or from the plugin file (bShowUnnamed)
 		std::uint32_t formID;
 		Kind          kind;
 		std::uint32_t pluginIndex; // index into Plugins()
@@ -98,14 +98,36 @@ namespace Catalog
 		bool          light;
 		std::uint32_t index;       // load index, or the light index for an ESL
 		std::uint32_t itemCount;
+		// Items with NO in-game name and no editor ID in memory (SE keeps none for most forms) - spells aside. With
+		// "Show items with no name" off they are hidden, and the page says how many; with it on, each one whose
+		// editor ID the plugin FILE holds is listed under it (namelessListed). Hidden = namelessFound - namelessListed.
+		std::uint32_t namelessFound;
+		std::uint32_t namelessListed;
 	};
+
+	// The nameless items of the last Build(), totalled for the log and the DevBench tool.
+	struct NamelessStats
+	{
+		bool          showUnnamed = false;   // what the setting was when the catalogue was built
+		std::size_t   found = 0;             // nameless items (no name, no editor ID in memory), spells aside
+		std::size_t   listed = 0;            // ...listed under an editor ID read from the plugin file
+		std::size_t   plugins = 0;           // plugins holding any of them
+		std::size_t   filesRead = 0;         // plugin files whose editor IDs were looked up (setting on)
+		std::size_t   filesCached = 0;       // ...of which answered from the cache
+		std::size_t   filesFailed = 0;       // ...of which could not be read
+		std::size_t   compressed = 0;        // compressed item records skipped in those files (no zlib)
+		double        milliseconds = 0.0;    // time spent reading plugin files
+	};
+
+	[[nodiscard]] const NamelessStats& LastNamelessStats();
 
 	// Bumped by every Build(). A cached query result is only still valid if it was computed
 	// against the same generation.
 	[[nodiscard]] std::uint32_t Generation();
 
 	// Build (or rebuild) the catalogue from the current load order. Safe to call again; the second
-	// call throws the first away. Returns the number of items found.
+	// call throws the first away. Returns the number of items found. With settings::general::showUnnamed
+	// on it also reads the editor IDs of nameless items from their plugin files on disk (cached per file).
 	std::size_t Build();
 
 	[[nodiscard]] bool Built();

@@ -4,10 +4,15 @@
 
 #include <unordered_set>
 
+#include "PluginFile.h"
+#include "Settings.h"
 #include "utils/Logger.h"
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
+#include <format>
+#include <mutex>
 #include <type_traits>
 #include <functional>
 #include <unordered_map>
@@ -115,6 +120,10 @@ namespace Catalog
 		// is that a plugin providing no items never appears, which is what we want anyway.
 		std::unordered_map<const RE::TESFile*, std::uint32_t> g_indexOf;
 
+		// Nameless items waiting for an editor ID from their plugin file (only filled with bShowUnnamed on).
+		std::vector<Item> g_nameless;
+		NamelessStats     g_namelessStats;
+
 		[[nodiscard]] std::uint32_t PluginIndexFor(const RE::TESFile* a_file)
 		{
 			const auto it = g_indexOf.find(a_file);
@@ -125,6 +134,8 @@ namespace Catalog
 			p.light = a_file->IsLight();
 			p.index = a_file->GetPartialIndex();
 			p.itemCount = 0;
+			p.namelessFound = 0;
+			p.namelessListed = 0;
 
 			const auto idx = static_cast<std::uint32_t>(g_plugins.size());
 			g_plugins.push_back(std::move(p));
@@ -139,6 +150,7 @@ namespace Catalog
 			if (!handler) { return; }
 
 			std::size_t added = 0;
+			std::size_t namelessCount = 0;
 			for (T* form : handler->GetFormArray<T>())
 			{
 				if (!form) { continue; }
@@ -182,9 +194,16 @@ namespace Catalog
 					}
 				}
 
-				// A form with neither a name nor an editor ID is not something a player can pick
-				// out of a list, so it is skipped rather than shown blank.
-				if (item.name.empty() && item.editorID.empty()) { continue; }
+				// A form with neither a name nor an editor ID is not something a player can pick out of a list, so it
+				// is not shown blank. Spells like that (abilities, effects nobody casts) are dropped as before. An ITEM
+				// like that is counted against its plugin - the page says how many are hidden - and, with "Show items
+				// with no name" on, kept aside to be listed under the editor ID its plugin FILE holds (binggo123,
+				// 2026-09-29: EldenSkyrim.esp's weapons, armour and books carry no name, only an editor ID).
+				const bool nameless = item.name.empty() && item.editorID.empty();
+				if (nameless)
+				{
+					if constexpr (std::is_same_v<T, RE::SpellItem>) { continue; }
+				}
 
 				item.pluginIndex = PluginIndexFor(file);
 				item.weight = form->GetWeight();
@@ -208,11 +227,136 @@ namespace Catalog
 				item.sortKeyLower = item.name.empty() ? item.editorLower : item.nameLower;
 				item.bulk = IsBulkItem(item);
 
+				if (nameless)
+				{
+					++g_plugins[item.pluginIndex].namelessFound;
+					++namelessCount;
+					// Resolved after every kind is collected, one plugin file at a time (ResolveNameless). With the
+					// setting off nothing is kept and no file is read - the count above is all the page needs.
+					if (settings::general::showUnnamed) { g_nameless.push_back(std::move(item)); }
+					continue;
+				}
+
 				g_items.push_back(std::move(item));
 				++added;
 			}
 
-			logger::debug("catalog: {} {}(s)", added, KindName(a_kind));
+			logger::debug("catalog: {} {}(s), {} nameless", added, KindName(a_kind), namelessCount);
+		}
+
+		// Gives each kept-aside nameless item the editor ID its plugin file holds, and lists the ones that got one.
+		// One file at a time, each read once per build (and cached across builds while the file is unchanged), and
+		// only files that HAVE nameless items - this runs inside Build(), never on the frame path.
+		void ResolveNameless()
+		{
+			auto& st = g_namelessStats;
+			st = NamelessStats{};
+			st.showUnnamed = settings::general::showUnnamed;
+			for (const Plugin& p : g_plugins)
+			{
+				st.found += p.namelessFound;
+				if (p.namelessFound) { ++st.plugins; }
+			}
+
+			// The summary names the plugins with the most, so the log says WHERE without listing every item.
+			struct PerFile { std::string name; std::uint32_t found; std::uint32_t listed; };
+			std::vector<PerFile> perFile;
+			for (const Plugin& p : g_plugins)
+			{
+				if (p.namelessFound) { perFile.push_back({ p.fileName, p.namelessFound, 0 }); }
+			}
+
+			if (!st.showUnnamed)
+			{
+				std::sort(perFile.begin(), perFile.end(), [](const PerFile& a, const PerFile& b) { return a.found > b.found; });
+				std::string most;
+				for (std::size_t i = 0; i < perFile.size() && i < 8; ++i)
+				{
+					most += std::format("{}{} {}", i ? ", " : "", perFile[i].name, perFile[i].found);
+				}
+				if (perFile.size() > 8) { most += std::format(", and {} more", perFile.size() - 8); }
+				logger::info("catalog: {} item(s) with no name in {} plugin(s) are hidden (Show items with no name is off){}{}",
+							 st.found, st.plugins, perFile.empty() ? "" : " - most: ", most);
+				g_nameless.clear();
+				return;
+			}
+
+			// Grouped by plugin, so each file is opened once.
+			std::vector<std::vector<std::size_t>> byPlugin(g_plugins.size());
+			for (std::size_t i = 0; i < g_nameless.size(); ++i)
+			{
+				if (g_nameless[i].pluginIndex < byPlugin.size()) { byPlugin[g_nameless[i].pluginIndex].push_back(i); }
+			}
+
+			std::vector<std::string> failed;
+			for (std::uint32_t pi = 0; pi < byPlugin.size(); ++pi)
+			{
+				if (byPlugin[pi].empty()) { continue; }
+				Plugin& plugin = g_plugins[pi];
+
+				const pluginfile::EditorIDs& ids = pluginfile::Read(plugin.fileName, plugin.light);
+				++st.filesRead;
+				if (ids.fromCache) { ++st.filesCached; }
+				st.compressed += ids.compressed;
+				st.milliseconds += ids.milliseconds;
+				if (!ids.opened)
+				{
+					++st.filesFailed;
+					failed.push_back(std::format("{} ({})", plugin.fileName, ids.error));
+					continue;
+				}
+				if (!ids.error.empty())
+				{
+					// Read part of the way: keep what was found, and say so.
+					logger::warn("catalog: {} {} - editor IDs read up to that point are used", plugin.fileName, ids.error);
+				}
+
+				for (const std::size_t i : byPlugin[pi])
+				{
+					Item& item = g_nameless[i];
+					const auto it = ids.byLocalID.find(pluginfile::LocalID(item.formID, plugin.light));
+					if (it == ids.byLocalID.end()) { continue; }
+
+					item.editorID = it->second;
+					item.editorLower = Lower(item.editorID);
+					item.sortKeyLower = item.editorLower;
+					++plugin.namelessListed;
+					g_items.push_back(std::move(item));
+				}
+			}
+			g_nameless.clear();
+
+			for (const Plugin& p : g_plugins)
+			{
+				st.listed += p.namelessListed;
+			}
+			for (PerFile& f : perFile)
+			{
+				for (const Plugin& p : g_plugins)
+				{
+					if (p.fileName == f.name) { f.listed = p.namelessListed; break; }
+				}
+			}
+			std::sort(perFile.begin(), perFile.end(), [](const PerFile& a, const PerFile& b) { return a.found > b.found; });
+			std::string from;
+			for (std::size_t i = 0; i < perFile.size() && i < 8; ++i)
+			{
+				from += std::format("{}{} {}/{}", i ? ", " : "", perFile[i].name, perFile[i].listed, perFile[i].found);
+			}
+			if (perFile.size() > 8) { from += std::format(", and {} more", perFile.size() - 8); }
+
+			logger::info("catalog: Show items with no name is on - {} item(s) with no name in {} plugin(s); {} got an editor "
+						 "ID from the plugin file, {} did not (still hidden); {} file(s) looked up ({} from the cache) in "
+						 "{:.0f} ms; {} compressed item record(s) skipped (this mod links no zlib){}{}",
+						 st.found, st.plugins, st.listed, st.found - st.listed, st.filesRead, st.filesCached, st.milliseconds,
+						 st.compressed, perFile.empty() ? "" : " - listed/found by file: ", from);
+			if (!failed.empty())
+			{
+				std::string names;
+				for (std::size_t i = 0; i < failed.size() && i < 5; ++i) { names += std::format("{}{}", i ? ", " : "", failed[i]); }
+				if (failed.size() > 5) { names += std::format(", and {} more", failed.size() - 5); }
+				logger::warn("catalog: {} plugin file(s) could not be read for editor IDs: {}", failed.size(), names);
+			}
 		}
 	}
 
@@ -373,11 +517,18 @@ namespace Catalog
 		}
 	}
 
+	const NamelessStats& LastNamelessStats() { return g_namelessStats; }
+
 	std::size_t Build()
 	{
+		// The page (render thread) and the DevBench tool (its own thread) can both ask for a build; never two at once.
+		static std::mutex s_buildLock;
+		std::lock_guard buildLock(s_buildLock);
+
 		g_plugins.clear();
 		g_items.clear();
 		g_indexOf.clear();
+		g_nameless.clear();
 		g_built = false;
 
 		if (!RE::TESDataHandler::GetSingleton())
@@ -399,6 +550,9 @@ namespace Catalog
 		Collect<RE::TESObjectMISC>(Kind::kMisc);
 		Collect<RE::TESObjectLIGH>(Kind::kLight);
 		Collect<RE::SpellItem>(Kind::kSpell);
+
+		// Before the quest marks and the counts, so a nameless item listed from its plugin file is treated like any other.
+		ResolveNameless();
 
 		MarkQuestObjects();
 

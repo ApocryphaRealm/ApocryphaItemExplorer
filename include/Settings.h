@@ -26,6 +26,12 @@ namespace settings
 		// them at all can switch them off here.
 		inline bool showQuestItems = true;       // bShowQuestItems:General
 
+		// Items with no in-game name - only an editor ID in their plugin file. Off by default: Skyrim.esm alone has
+		// hundreds (creature skins, tokens, test items) and they would bury what a plugin really adds. On, each is
+		// listed under the editor ID read from its plugin file on disk (SE keeps none in memory), tagged "(no name)".
+		// Off, a plugin's view says how many it hides. Changing it re-reads the catalogue.
+		inline bool showUnnamed = false;         // bShowUnnamed:General
+
 		// Catalog::Sort - 0 A-Z, 1 Z-A, 2 value high, 3 value low, 4 weight high, 5 weight low.
 		inline std::uint32_t sortMode = 0;       // uSortMode:General
 	}

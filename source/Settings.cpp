@@ -30,6 +30,7 @@ namespace settings
 			bool          includeSpells;
 			bool          show3DPreview;
 			bool          showQuestItems;
+			bool          showUnnamed;
 			std::uint32_t sortMode;
 			float         paneX;
 			float         paneY;
@@ -119,6 +120,7 @@ namespace settings
 			get("bincludespells:general", general::includeSpells, ParseBool);
 			get("bshow3dpreview:general", general::show3DPreview, ParseBool);
 			get("bshowquestitems:general", general::showQuestItems, ParseBool);
+			get("bshowunnamed:general", general::showUnnamed, ParseBool);
 			get("usortmode:general", general::sortMode, ParseUInt);
 			get("fpanex:preview", preview::paneX, ParseFloat);
 			get("fpaney:preview", preview::paneY, ParseFloat);
@@ -143,9 +145,9 @@ namespace settings
 			// would index past the end of the mode table.
 			if (general::sortMode >= static_cast<std::uint32_t>(Catalog::Sort::kCount)) { general::sortMode = 0; }
 			logger::info("settings loaded from {}: defaultCount={} includeSpells={} preview3D={} "
-						 "questItems={} sortMode={} logLevel={}",
+						 "questItems={} showUnnamed={} sortMode={} logLevel={}",
 						 iniPath, general::defaultCount, general::includeSpells, general::show3DPreview,
-						 general::showQuestItems, general::sortMode, debug::logLevel);
+						 general::showQuestItems, general::showUnnamed, general::sortMode, debug::logLevel);
 			logger::info("preview box: centre ({:.2f}, {:.2f}) size {:.2f}, model scale {:.2f}, offset ({:.0f}, {:.0f})",
 						 preview::paneX, preview::paneY, preview::paneSize, preview::modelScale, preview::offsetX, preview::offsetY);
 			return true;
@@ -156,20 +158,42 @@ namespace settings
 			const std::string wantSection = Lower(a_section);
 			const std::string wantKey = Lower(a_key);
 			std::string section;
-			for (auto& line : a_lines)
+			// Where the section's last key sits, so a key the file does not have yet can be added there.
+			std::size_t lastInSection = std::string::npos;
+			for (std::size_t i = 0; i < a_lines.size(); ++i)
 			{
+				auto& line = a_lines[i];
 				const std::string t = Trim(line);
-				if (!t.empty() && t.front() == '[' && t.back() == ']') { section = Lower(t.substr(1, t.size() - 2)); continue; }
+				if (!t.empty() && t.front() == '[' && t.back() == ']')
+				{
+					section = Lower(t.substr(1, t.size() - 2));
+					if (section == wantSection) { lastInSection = i; }
+					continue;
+				}
 				const auto eq = t.find('=');
 				if (eq == std::string::npos || section != wantSection) { continue; }
+				lastInSection = i;
 				if (Lower(Trim(t.substr(0, eq))) == wantKey)
 				{
 					line = std::string(a_key) + "=" + a_value;
 					return true;
 				}
 			}
-			logger::warn("Save: key {} not found in [{}]", a_key, a_section);
-			return false;
+			// A key added in a later version (bShowUnnamed, 1.1.4) is missing from an INI the player kept from an older
+			// one. Writing it in, rather than warning and dropping it, is what makes the new setting survive a restart
+			// for them too (rule 16).
+			const std::string added = std::string(a_key) + "=" + a_value;
+			if (lastInSection != std::string::npos)
+			{
+				a_lines.insert(a_lines.begin() + static_cast<std::ptrdiff_t>(lastInSection) + 1, added);
+			}
+			else
+			{
+				a_lines.push_back("[" + std::string(a_section) + "]");
+				a_lines.push_back(added);
+			}
+			logger::info("Save: {} was not in [{}] (an INI from an older version) - added", a_key, a_section);
+			return true;
 		}
 	}
 
@@ -178,7 +202,7 @@ namespace settings
 		iniPath = (std::filesystem::current_path() / "Data" / "SKSE" / "Plugins" / a_iniFileName).string();
 
 		defaults = { debug::logLevel, general::defaultCount, general::includeSpells,
-					 general::show3DPreview, general::showQuestItems, general::sortMode,
+					 general::show3DPreview, general::showQuestItems, general::showUnnamed, general::sortMode,
 					 preview::paneX, preview::paneY, preview::paneSize, preview::modelScale, preview::offsetX, preview::offsetY,
 					 preview::backgroundR, preview::backgroundG, preview::backgroundB, preview::paneAlpha };
 
@@ -189,6 +213,7 @@ namespace settings
 			utils::MakeSetting("bIncludeSpells:General", general::includeSpells),
 			utils::MakeSetting("bShow3DPreview:General", general::show3DPreview),
 			utils::MakeSetting("bShowQuestItems:General", general::showQuestItems),
+			utils::MakeSetting("bShowUnnamed:General", general::showUnnamed),
 			utils::MakeSetting("uSortMode:General", static_cast<unsigned int>(general::sortMode)),
 			utils::MakeSetting("fPaneX:Preview", preview::paneX),
 			utils::MakeSetting("fPaneY:Preview", preview::paneY),
@@ -227,6 +252,7 @@ namespace settings
 		ok &= WriteKey(lines, "General", "bIncludeSpells", general::includeSpells ? "1" : "0");
 		ok &= WriteKey(lines, "General", "bShow3DPreview", general::show3DPreview ? "1" : "0");
 		ok &= WriteKey(lines, "General", "bShowQuestItems", general::showQuestItems ? "1" : "0");
+		ok &= WriteKey(lines, "General", "bShowUnnamed", general::showUnnamed ? "1" : "0");
 		ok &= WriteKey(lines, "General", "uSortMode", std::to_string(general::sortMode));
 		ok &= WriteKey(lines, "Preview", "fPaneX", FloatText(preview::paneX));
 		ok &= WriteKey(lines, "Preview", "fPaneY", FloatText(preview::paneY));
@@ -253,6 +279,7 @@ namespace settings
 		general::includeSpells = defaults.includeSpells;
 		general::show3DPreview = defaults.show3DPreview;
 		general::showQuestItems = defaults.showQuestItems;
+		general::showUnnamed = defaults.showUnnamed;
 		general::sortMode = defaults.sortMode;
 		preview::paneX = defaults.paneX;
 		preview::paneY = defaults.paneY;

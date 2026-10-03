@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.1.4 - 2026-10-03 - untested
+
+### Added
+- **Show items with no name** (Browse page, beside Show quest items; INI `[General] bShowUnnamed`, default 0 = off). Many mods ship items with no in-game name, only an editor ID in the plugin file - EldenSkyrim.esp ("Elden Rim - Weapon") has 7 of its 8 weapons, 32 of its 35 armour pieces and all 14 of its books like that, and none of them were listed (binggo123 on Nexus, 2026-09-29: "some esps also cannot be displayed ... All of these can be displayed and extracted normally using AddItemMenu"). Skyrim SE keeps no editor ID in memory for most forms, so the catalogue skipped any item with neither a name nor an in-memory editor ID. Switched on, each such item is listed under the editor ID read from its plugin file on disk, with a greyed "(no name)" tag on its row, and can be searched, added and favourited like any other. Off by default because Skyrim.esm alone holds hundreds of nameless skins, tokens and test items. The switch is saved to the INI and re-reads the catalogue.
+- With the switch off, a plugin's view says how many of its items are hidden for having no name and how to list them ("12 items here have no name and are hidden - turn on Show items with no name to list them"). A plugin whose only items are nameless now stays in the plugin list with (0), so its view can say so instead of the plugin vanishing.
+- The plugin file reader (`source/PluginFile.cpp`): reads the TES4 header for the master count, then only the top-level groups of the item record types (WEAP, ARMO, AMMO, BOOK, INGR, ALCH, SCRL, SLGM, KEYM, MISC, LIGH) - cells, worldspaces, quests and dialogue are skipped by seeking past them, so Skyrim.esm takes about 17 ms (7,790 item records). Only records the plugin itself defines (form id top byte = its master count) are kept, matched to the loaded form by its local id (low 24 bits, low 12 for a light plugin). Read only for plugins that have nameless items, once per catalogue build, and cached by file name, size and write time across builds. Compressed records are counted and skipped: this mod links no zlib. Spells with no name are still never listed.
+- The log says per build how many nameless items were found, how many got an editor ID from the plugin file, how many files were read (and from the cache), the compressed records skipped, and the plugins with the most (summarised, not per item). Off, it says how many are hidden and where.
+- DevBench `itemexplorer.control`: `op=set:showUnnamed=<0|1>` flips the switch as the page does (saved, catalogue re-read) and reports the nameless totals; `op=plugins` reports `nameless`, `namelessListed` and `hiddenNoName` per plugin plus the build's totals; `find`/`findall` match the editor IDs read from the files and mark each hit `noName`; the status reply carries `showUnnamed`.
+- Four new strings in all eleven languages.
+
+### Fixed
+- Saving settings into an INI kept from an older version no longer drops a key that INI does not have yet: the key is written into its section (it used to log "key not found" and keep the value for the session only - rule 16).
+- The page's preview and highlight no longer keep pointers into a catalogue the DevBench tool rebuilt from its own thread; they are cleared on every rebuild, and the selected plugin is kept by name.
+
 ## 1.1.3 - 2026-10-03 - untested
 
 ### Changed

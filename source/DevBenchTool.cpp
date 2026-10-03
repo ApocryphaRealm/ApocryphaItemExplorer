@@ -87,12 +87,51 @@ namespace DevBenchTool
 				{
 					if (!first) { json += ','; }
 					first = false;
-					json += std::format("{{\"file\":\"{}\",\"light\":{},\"index\":{},\"items\":{}}}",
+					// nameless: items with no name and no editor ID in memory; namelessListed: of those, listed under an
+					// editor ID read from the plugin file (Show items with no name on); hiddenNoName: the rest, which the
+					// page's plugin view reports as hidden.
+					json += std::format("{{\"file\":\"{}\",\"light\":{},\"index\":{},\"items\":{},"
+										"\"nameless\":{},\"namelessListed\":{},\"hiddenNoName\":{}}}",
 										EscapeJson(p.fileName), p.light ? "true" : "false",
-										p.index, p.itemCount);
+										p.index, p.itemCount, p.namelessFound, p.namelessListed,
+										p.namelessFound - p.namelessListed);
 				}
-				json += "]}";
+				const auto& ns = Catalog::LastNamelessStats();
+				json += std::format("],\"showUnnamed\":{},\"nameless\":{{\"found\":{},\"listed\":{},\"plugins\":{},"
+									"\"filesRead\":{},\"filesCached\":{},\"filesFailed\":{},\"compressedSkipped\":{},\"ms\":{:.1f}}}}}",
+									ns.showUnnamed ? "true" : "false", ns.found, ns.listed, ns.plugins,
+									ns.filesRead, ns.filesCached, ns.filesFailed, ns.compressed, ns.milliseconds);
 				a_write(a_sink, json.c_str());
+				return;
+			}
+
+			// op=set:showUnnamed=<0|1> - flip "Show items with no name" exactly as the page's switch does: save it to
+			// the INI, re-read the catalogue, and report what that found. A peer of every other op (logic library: a
+			// driving op nested inside another op's branch is unreachable).
+			if (has("\"set:"))   // the op VALUE starts with set: - a find needle that merely contains it is not this op
+			{
+				const std::string rest = After(args, "set:");
+				const auto eq = rest.find('=');
+				const std::string key = rest.substr(0, eq);
+				const std::string val = eq == std::string::npos ? std::string{} : rest.substr(eq + 1);
+				if (key != "showUnnamed" || (val != "0" && val != "1"))
+				{
+					a_write(a_sink, "{\"ok\":false,\"op\":\"set\",\"error\":\"expected set:showUnnamed=<0|1>\"}");
+					return;
+				}
+				settings::general::showUnnamed = (val == "1");
+				const bool saved = settings::Save();
+				logger::info("devbench: Show items with no name set {} (saved to the INI: {}) - re-reading the catalogue",
+							 settings::general::showUnnamed ? "on" : "off", saved ? "yes" : "no");
+				const std::size_t n = Catalog::Build();
+				const auto& ns = Catalog::LastNamelessStats();
+				a_write(a_sink, std::format(
+					"{{\"ok\":true,\"op\":\"set\",\"showUnnamed\":{},\"saved\":{},\"items\":{},\"plugins\":{},"
+					"\"nameless\":{{\"found\":{},\"listed\":{},\"hidden\":{},\"filesRead\":{},\"filesCached\":{},"
+					"\"filesFailed\":{},\"compressedSkipped\":{},\"ms\":{:.1f}}}}}",
+					settings::general::showUnnamed ? "true" : "false", saved ? "true" : "false", n, Catalog::Plugins().size(),
+					ns.found, ns.listed, ns.found - ns.listed, ns.filesRead, ns.filesCached, ns.filesFailed, ns.compressed,
+					ns.milliseconds).c_str());
 				return;
 			}
 
@@ -170,13 +209,14 @@ namespace DevBenchTool
 					first = false;
 					json += std::format(
 						"{{\"name\":\"{}\",\"editorID\":\"{}\",\"formID\":\"0x{:08X}\",\"kind\":\"{}\","
-						"\"plugin\":\"{}\",\"weight\":{:.1f},\"value\":{},\"pile\":{}}}",
+						"\"plugin\":\"{}\",\"weight\":{:.1f},\"value\":{},\"pile\":{},\"noName\":{}}}",
 						EscapeJson(it->name), EscapeJson(it->editorID), it->formID,
 						Catalog::KindName(it->kind),
 						EscapeJson(it->pluginIndex < Catalog::Plugins().size()
 									   ? Catalog::Plugins()[it->pluginIndex].fileName
 									   : "?"),
-						it->weight, it->value, it->bulk ? "true" : "false");   // pile: the row has its own amount slider
+						it->weight, it->value, it->bulk ? "true" : "false",   // pile: the row has its own amount slider
+						it->name.empty() ? "true" : "false");                  // noName: listed under its editor ID
 				}
 				json += "]}";
 				a_write(a_sink, json.c_str());
@@ -230,9 +270,10 @@ namespace DevBenchTool
 			}
 
 			a_write(a_sink, std::format(
-				"{{\"ok\":true,\"settings\":{{\"defaultCount\":{},\"includeSpells\":{},\"logLevel\":{},"
+				"{{\"ok\":true,\"settings\":{{\"defaultCount\":{},\"includeSpells\":{},\"showUnnamed\":{},\"logLevel\":{},"
 				"\"iniPath\":\"{}\"}},\"runtime\":{{\"built\":{},\"plugins\":{},\"items\":{}}}}}",
 				settings::general::defaultCount, settings::general::includeSpells,
+				settings::general::showUnnamed ? "true" : "false",
 				settings::debug::logLevel, EscapeJson(settings::GetIniPath()),
 				Catalog::Built() ? "true" : "false",
 				Catalog::Plugins().size(), Catalog::Items().size()).c_str());
@@ -258,9 +299,12 @@ namespace DevBenchTool
 			"read live from TESDataHandler. op=plugins lists each loaded file with its item count (the "
 			"enumeration proof - check it against the load order on disk). op=build forces a rebuild. "
 			"op=find:<text> searches every plugin at once by item name or editor ID, capped at 60 results, hiding enchanted variants of equipment the way the page does; op=findall:<text> is the same but includes them. "
+			"With Show items with no name on (INI bShowUnnamed), an item with no in-game name is listed under the editor ID read from its plugin file, so find/findall match those editor IDs too; each hit carries noName. "
+			"op=set:showUnnamed=<0|1> flips that setting the way the page's switch does (saved to the INI, catalogue re-read) and reports how many nameless items were found, listed and still hidden, the plugin files read and the compressed records skipped. "
+			"op=plugins also reports per plugin nameless (no name and no editor ID in memory), namelessListed and hiddenNoName (the count the page's plugin view says is hidden), plus the build's nameless totals. "
 			"op=give:<hex formID>[:<count>] puts an item in the player's inventory through the game's own "
 			"path, queued onto the main thread; a spell is taught instead of added. op=reload re-reads the "
-			"INI. No argument reports settings and whether the catalogue has been built yet. "
+			"INI (op=build afterwards applies a changed bShowUnnamed). No argument reports settings and whether the catalogue has been built yet. "
 			"The 3D preview: op=preview:<hex formID> makes the pane show that form with no mouse; "
 			"op=previewstate reports whether the helper menu is open, whether the engine holds a model "
 			"(managerModels), how many captures landed (renders) and the captured size; op=pane:<cx>,<cy>,<size> "
