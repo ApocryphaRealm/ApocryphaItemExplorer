@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.1.2 - 2026-10-03 - untested
+
+### Added
+- A quantity slider on every row you hold a pile of - potions and food, ingredients, scrolls, arrows and bolts, soul gems, torches, lockpicks, and crafting materials (ore and ingots, hides and leather, firewood, gems, claws, feathers, dragon bone and scale, Hearthfire's building materials) - on the Browse page AND the Favourites page. Each row keeps its own amount (1 to 50) for the session; the one "How many" slider at the top of Browse is gone. The owner, 2026-10-02.
+
+### Changed
+- Every slider moves one unit of its shown digit per keyboard or D-pad nudge (rule 68): the amount sliders, gold, and the preview's position and size. A mouse drag and a typed number are unchanged.
+
+### Fixed
+- Firewood never counted as a pile: the game spells its keyword VendorItemFireword, and only the correct spelling was checked. Crafting materials are now also recognised by use - any Misc item a crafting recipe takes (218 in the test load order, Hearthfire's clay, nails, hinges, logs and glass among them) - instead of by keyword alone.
+
 ## 1.1.1 - 2026-09-19 - untested
 
 ### Fixed

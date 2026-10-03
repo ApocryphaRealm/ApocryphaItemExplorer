@@ -5,6 +5,7 @@
 #include "SKSEMenuFramework.h"
 
 #include "Catalog.h"
+#include "PreciseSlider.h"
 #include "Favourites.h"
 #include "Preview.h"
 #include "Settings.h"
@@ -12,6 +13,8 @@
 #include "utils/Logger.h"
 #include "utils/Strings.h"
 #include "utils/Toggle.h"
+
+#include <unordered_map>
 
 #include <algorithm>
 #include <array>
@@ -51,7 +54,9 @@ namespace UI
 		char        g_pluginFilter[128] = {};
 		char        g_itemSearch[128] = {};
 		int         g_selectedPlugin = -1;
-		int         g_addCount = 1;
+		// How many of each pile to add, one amount per item (2026-10-02: a slider on every row you hold a pile of, on
+		// Browse AND Favourites, instead of one "How many" at the top of Browse). Kept for the session.
+		std::unordered_map<RE::FormID, int> g_rowCount;
 		// Gold gets its own amount because its sane range is nothing like anything else's: you ask
 		// for 5 potions and 5000 septims. One slider covering both would have useless precision at
 		// the low end, so the special case lives on the one row it applies to (the owner, 2026-09-10:
@@ -155,7 +160,7 @@ namespace UI
 			// A framework older than that is refused here rather than met with a null call.
 			"igGetIO", "igGetForegroundDrawList_Nil",
 			"ImDrawList_AddLine", "ImDrawList_AddText_Vec2",
-			"igSliderFloat", "igCombo_Str_arr",
+			"igSliderFloat", "igSliderInt", "igIsKeyDown_Nil", "igIsMouseDown_Nil", "igCombo_Str_arr",
 			// 1.0.7: the 3D preview pane is an image of the engine's own render, and the row under
 			// the cursor OR under D-pad focus is what it shows.
 			"igIsItemFocused", "ImDrawList_AddImage", "igCalcTextSize",
@@ -347,9 +352,9 @@ namespace UI
 			if (!settings::general::show3DPreview) { return; }
 			ImGuiMCP::TextDisabled("%s", strings::TR("AIE_PreviewWhere", "Where the preview box sits - it floats in front of this window, so put it anywhere"));
 			ImGuiMCP::PushItemWidth(220.0F);
-			ImGuiMCP::SliderFloat(strings::TR("AIE_PreviewX", "Pane across"), &settings::preview::paneX, 0.05F, 0.95F, "%.2f", 0);
-			ImGuiMCP::SliderFloat(strings::TR("AIE_PreviewY", "Pane down"), &settings::preview::paneY, 0.05F, 0.95F, "%.2f", 0);
-			ImGuiMCP::SliderFloat(strings::TR("AIE_PreviewSize", "Pane size"), &settings::preview::paneSize, 0.08F, 0.90F, "%.2f", 0);
+			precise::SliderFloat(strings::TR("AIE_PreviewX", "Pane across"), &settings::preview::paneX, 0.05F, 0.95F, "%.2f");
+			precise::SliderFloat(strings::TR("AIE_PreviewY", "Pane down"), &settings::preview::paneY, 0.05F, 0.95F, "%.2f");
+			precise::SliderFloat(strings::TR("AIE_PreviewSize", "Pane size"), &settings::preview::paneSize, 0.08F, 0.90F, "%.2f");
 			ImGuiMCP::PopItemWidth();
 			ImGuiMCP::TextDisabled("%s", strings::TR("AIE_PreviewMouseHint",
 								   "Click an item in the list to fix it here - then hold the left mouse button on it to turn it, and scroll the wheel to zoom. Without a click the preview just follows the mouse."));
@@ -373,9 +378,10 @@ namespace UI
 			// crafting material uses the slider; anything else is a single item, because fifty
 			// cuirasses is never what was meant.
 			const bool  gold    = IsGold(a_item);
-			const bool  bulk    = a_item.bulk;
+			const bool  bulk    = a_item.bulk && !gold;
+			int*        rowAmount = bulk ? &g_rowCount.try_emplace(a_item.formID, 1).first->second : nullptr;
 			const int   rowMax  = gold ? kGoldMax : (bulk ? kStackMax : 1);
-			const int   rowWant = gold ? g_goldCount : (bulk ? g_addCount : 1);
+			const int   rowWant = gold ? g_goldCount : (bulk ? *rowAmount : 1);
 
 			if (ImGuiMCP::Button(strings::TR("AIE_Add", "Add")))
 			{
@@ -393,10 +399,25 @@ namespace UI
 			{
 				ImGuiMCP::SameLine();
 				ImGuiMCP::PushItemWidth(220.0F);
-				ImGuiMCP::SliderInt("##goldamount", &g_goldCount, 1, kGoldMax);
+				precise::SliderInt("##goldamount", &g_goldCount, 1, kGoldMax);
 				ImGuiMCP::PopItemWidth();
 				if (g_goldCount < 1) { g_goldCount = 1; }
 				if (g_goldCount > kGoldMax) { g_goldCount = kGoldMax; }
+				NoteRow(a_item);
+			}
+			// A pile's own amount, on its own row - Browse and Favourites alike (they draw the same rows).
+			else if (bulk)
+			{
+				ImGuiMCP::SameLine();
+				ImGuiMCP::PushItemWidth(140.0F);
+				precise::SliderInt("##amount", rowAmount, 1, kStackMax);
+				ImGuiMCP::PopItemWidth();
+				*rowAmount = std::clamp(*rowAmount, 1, kStackMax);
+				NoteRow(a_item);
+				if (ImGuiMCP::IsItemHovered())
+				{
+					ImGuiMCP::SetTooltip("%s", strings::TR("AIE_AmountTip", "How many Add gives you"));
+				}
 			}
 
 			// The favourite toggle. A filled star means it is on the Favourites page; the label is
@@ -524,15 +545,7 @@ namespace UI
 		}
 
 		ImGuiMCP::Spacing();
-		ImGuiMCP::PushItemWidth(220.0F);
-		// A slider rather than a typed number: the useful range is small and bounded, and a
-		// slider cannot be left holding a half-typed value. Gold is not covered here - it has
-		// its own control on its own row.
-		ImGuiMCP::SliderInt(strings::TR("AIE_HowMany", "How many"), &g_addCount, 1, kStackMax);
-		ImGuiMCP::PopItemWidth();
-		if (g_addCount < 1) { g_addCount = 1; }
-		if (g_addCount > kStackMax) { g_addCount = kStackMax; }
-		ImGuiMCP::SameLine();
+		// The amount is on each pile's own row now (2026-10-02), not one "How many" up here.
 		ImGuiMCP::Toggle(strings::TR("AIE_SearchEverywhere", "Search every plugin"), &g_searchEverywhere);
 		ImGuiMCP::Toggle(strings::TR("AIE_ShowEnchanted", "Show enchanted variants"), &g_showEnchanted);
 		ImGuiMCP::SameLine();

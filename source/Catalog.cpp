@@ -41,8 +41,34 @@ namespace Catalog
 		// read off the form rather than guessed from its name. Decided here, at build time, because
 		// HasKeywordString walks the form's keyword list comparing strings and the page would
 		// otherwise do it for every visible row on every frame.
+		// Every Misc item some crafting recipe (COBJ) uses as a material: ore and ingots, leather and strips, Hearthfire's
+		// clay, nails, hinges and logs, and any modded material, without naming them one by one. Filled at the start of
+		// each Build(), before the items are collected. (A form's editor id is not kept in memory, so a name prefix such as
+		// "BYOHMaterial" cannot be matched - the first try at Hearthfire's materials, 2026-10-03.)
+		std::unordered_set<const RE::TESForm*> g_craftingParts;
+
+		void CollectCraftingParts()
+		{
+			g_craftingParts.clear();
+			auto* handler = RE::TESDataHandler::GetSingleton();
+			if (!handler) { return; }
+			for (RE::BGSConstructibleObject* cobj : handler->GetFormArray<RE::BGSConstructibleObject>())
+			{
+				if (!cobj) { continue; }
+				cobj->requiredItems.ForEachContainerObject([](RE::ContainerObject& a_entry) {
+					if (a_entry.obj && a_entry.obj->Is(RE::FormType::Misc)) { g_craftingParts.insert(a_entry.obj); }
+					return RE::BSContainer::ForEachResult::kContinue;
+				});
+			}
+			logger::info("catalog: {} misc item(s) are crafting materials (a recipe uses them) - each gets its own amount slider",
+						 g_craftingParts.size());
+		}
+
 		[[nodiscard]] bool IsBulkItem(const Item& a_item)
 		{
+			// Everything you hold a pile of (the owner, 2026-10-02: "anything that is consumable or usable, like lockpicks,
+			// crafting materials, ingredients, food items, and others"). Food is a potion form, so kPotion covers it; a
+			// carried torch is a Light.
 			switch (a_item.kind)
 			{
 			case Kind::kPotion:
@@ -50,14 +76,23 @@ namespace Catalog
 			case Kind::kScroll:
 			case Kind::kAmmo:
 			case Kind::kSoulGem:
+			case Kind::kLight:
 				return true;
 			default:
 				break;
 			}
+			// Lockpick (Skyrim.esm 0x0000000A): a Misc item with only VendorItemTool, which pickaxes share in spirit.
+			if (a_item.formID == 0x0000000A) { return true; }
+			// a material some recipe uses (Hearthfire's building materials among them - they carry no vendor keyword)
+			if (a_item.kind == Kind::kMisc && a_item.form && g_craftingParts.contains(a_item.form)) { return true; }
 			if (const auto* kwf = a_item.form ? a_item.form->As<RE::BGSKeywordForm>() : nullptr)
 			{
-				for (const char* kw : { "VendorItemOreIngot", "VendorItemAnimalHide",
-										"VendorItemFirewood", "VendorItemGem" })
+				// crafting materials: ore and ingots, hides and leather, firewood, gems, and animal parts (claws,
+				// feathers, dragon bone and scale), plus vendor "tools" (lockpicks in mods that add their own)
+				// "VendorItemFireword" is the game's own spelling of the firewood keyword (the correct spelling never
+				// matched - firewood had no amount slider before 1.1.2)
+				for (const char* kw : { "VendorItemOreIngot", "VendorItemAnimalHide", "VendorItemFireword",
+										"VendorItemFirewood", "VendorItemGem", "VendorItemAnimalPart", "VendorItemTool" })
 				{
 					if (kwf->HasKeywordString(kw)) { return true; }
 				}
@@ -351,6 +386,7 @@ namespace Catalog
 			return 0;
 		}
 
+		CollectCraftingParts();
 		Collect<RE::TESObjectWEAP>(Kind::kWeapon);
 		Collect<RE::TESObjectARMO>(Kind::kArmor);
 		Collect<RE::TESAmmo>(Kind::kAmmo);

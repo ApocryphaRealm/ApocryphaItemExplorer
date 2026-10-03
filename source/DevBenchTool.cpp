@@ -170,13 +170,13 @@ namespace DevBenchTool
 					first = false;
 					json += std::format(
 						"{{\"name\":\"{}\",\"editorID\":\"{}\",\"formID\":\"0x{:08X}\",\"kind\":\"{}\","
-						"\"plugin\":\"{}\",\"weight\":{:.1f},\"value\":{}}}",
+						"\"plugin\":\"{}\",\"weight\":{:.1f},\"value\":{},\"pile\":{}}}",
 						EscapeJson(it->name), EscapeJson(it->editorID), it->formID,
 						Catalog::KindName(it->kind),
 						EscapeJson(it->pluginIndex < Catalog::Plugins().size()
 									   ? Catalog::Plugins()[it->pluginIndex].fileName
 									   : "?"),
-						it->weight, it->value);
+						it->weight, it->value, it->bulk ? "true" : "false");   // pile: the row has its own amount slider
 				}
 				json += "]}";
 				a_write(a_sink, json.c_str());
