@@ -9,7 +9,7 @@ namespace settings
 {
 	namespace debug
 	{
-		inline std::uint32_t logLevel = 0;  // uLogLevel:Debug
+		inline std::uint32_t logLevel = 2;  // uLogLevel:Debug - info, the shipped default (the owner, 2026-09-26)
 	}
 
 	namespace general

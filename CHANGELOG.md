@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.3 - 2026-10-03 - untested
+
+### Changed
+- The log ships at info (uLogLevel=2, compiled and in the INI), the standing default since 2026-09-26; it shipped at trace. 1.1.2 (the amount sliders) was tagged but not released; 1.1.3 is the release carrying it.
+
 ## 1.1.2 - 2026-10-03 - untested
 
 ### Added
