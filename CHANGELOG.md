@@ -12,7 +12,16 @@
 
 ### Fixed
 - Saving settings into an INI kept from an older version no longer drops a key that INI does not have yet: the key is written into its section (it used to log "key not found" and keep the value for the session only - rule 16).
+- Settings changed on the page are saved: the sort order and Show quest items at once, the preview pane's sliders when
+  let go. Nothing on the page saved before, so they reset at every start (rule 16).
 - The page's preview and highlight no longer keep pointers into a catalogue the DevBench tool rebuilt from its own thread; they are cleared on every rebuild, and the selected plugin is kept by name.
+
+### Tested (2026-10-03, SE 1.5.97, Njordlinger Test, EldenSkyrim.esp loaded alone, through DevBench)
+- Off (default): EldenSkyrim.esp reports 54 nameless items hidden; findall:ScarletKnight finds nothing.
+- On: all 54 listed under the editor ID from the file, each with noName; ScarletKnight, the RealEbony set,
+  EldenFist and AkatoshNote001 found; give:DB000A6A added the weapon ("catalog: added 1 x"); 3,548 nameless items
+  in 115 plugins resolved in 87 ms; the new key was written into an older INI that lacked it.
+- NOT yet seen: the page itself (the switch, the "(no name)" tag, the hidden-items line) - the PC was locked.
 
 ## 1.1.3 - 2026-10-03 - untested
 

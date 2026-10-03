@@ -171,7 +171,7 @@ namespace UI
 			// the cursor OR under D-pad focus is what it shows.
 			"igIsItemFocused", "ImDrawList_AddImage", "igCalcTextSize",
 			// 1.1.1: R3 takes hold of the previewed item and circle lets go.
-			"igIsKeyPressed_Bool",
+			"igIsKeyPressed_Bool", "igIsAnyItemActive",
 			"igSetKeyboardFocusHere",
 			"igBeginTable", "igEndTable", "igTableNextColumn"
 		};
@@ -237,11 +237,15 @@ namespace UI
 									static_cast<int>(labels.size())))
 				{
 					settings::general::sortMode = static_cast<std::uint32_t>(sort);
+					settings::Save();   // rule 16: a page change persists (nothing saved it before 1.1.4)
 				}
 			}
 
-			ImGuiMCP::Toggle(strings::TR("AIE_ShowQuestItems", "Show quest items"),
-							 &settings::general::showQuestItems);
+			if (ImGuiMCP::Toggle(strings::TR("AIE_ShowQuestItems", "Show quest items"),
+								 &settings::general::showQuestItems))
+			{
+				settings::Save();
+			}
 			ImGuiMCP::SameLine();
 			ImGuiMCP::TextDisabled("%s", strings::TR("AIE_QuestHint",
 								   "items a quest calls its own - always tagged [quest] when shown"));
@@ -396,9 +400,16 @@ namespace UI
 			if (!settings::general::show3DPreview) { return; }
 			ImGuiMCP::TextDisabled("%s", strings::TR("AIE_PreviewWhere", "Where the preview box sits - it floats in front of this window, so put it anywhere"));
 			ImGuiMCP::PushItemWidth(220.0F);
-			precise::SliderFloat(strings::TR("AIE_PreviewX", "Pane across"), &settings::preview::paneX, 0.05F, 0.95F, "%.2f");
-			precise::SliderFloat(strings::TR("AIE_PreviewY", "Pane down"), &settings::preview::paneY, 0.05F, 0.95F, "%.2f");
-			precise::SliderFloat(strings::TR("AIE_PreviewSize", "Pane size"), &settings::preview::paneSize, 0.08F, 0.90F, "%.2f");
+			// saved when a slider is let go (or after a nudge), never once per frame of a drag
+			static bool s_paneDirty = false;
+			s_paneDirty |= precise::SliderFloat(strings::TR("AIE_PreviewX", "Pane across"), &settings::preview::paneX, 0.05F, 0.95F, "%.2f");
+			s_paneDirty |= precise::SliderFloat(strings::TR("AIE_PreviewY", "Pane down"), &settings::preview::paneY, 0.05F, 0.95F, "%.2f");
+			s_paneDirty |= precise::SliderFloat(strings::TR("AIE_PreviewSize", "Pane size"), &settings::preview::paneSize, 0.08F, 0.90F, "%.2f");
+			if (s_paneDirty && !ImGuiMCP::IsAnyItemActive())
+			{
+				s_paneDirty = false;
+				settings::Save();
+			}
 			ImGuiMCP::PopItemWidth();
 			ImGuiMCP::TextDisabled("%s", strings::TR("AIE_PreviewMouseHint",
 								   "Click an item in the list to fix it here - then hold the left mouse button on it to turn it, and scroll the wheel to zoom. Without a click the preview just follows the mouse."));
