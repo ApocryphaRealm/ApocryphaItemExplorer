@@ -150,7 +150,7 @@ namespace UI
 		// this check refuses to register at all if even one of them is missing.
 		constexpr const char* kRequired[] = {
 			"AddSectionItem",
-			"igTextV", "igTextDisabledV", "igTextWrappedV",
+			"igTextV", "igTextDisabledV", "igTextWrappedV", "igPushTextWrapPos", "igPopTextWrapPos",
 			"igButton", "igCheckbox", "igInputInt", "igInputText",
 			"igSelectable_Bool", "igBeginChild_Str", "igEndChild",
 			"igSeparator", "igSeparatorText", "igSpacing", "igSameLine",
@@ -258,8 +258,11 @@ namespace UI
 				g_unnamedChanged = true;
 			}
 			ImGuiMCP::SameLine();
+			// wrapped to the page: at 1024x768 an unwrapped hint ran under the preview box (2026-10-03 capture)
+			ImGuiMCP::PushTextWrapPos(0.0F);
 			ImGuiMCP::TextDisabled("%s", strings::TR("AIE_NoNameHint",
 								   "items with only an editor ID, read from the plugin file - tagged (no name)"));
+			ImGuiMCP::PopTextWrapPos();
 
 			ImGuiMCP::Spacing();
 			if (ImGuiMCP::Button(strings::TR("AIE_All", "All")))
@@ -746,7 +749,9 @@ namespace UI
 								  strings::TR("AIE_NoNameHidden",
 											  "%d items here have no name and are hidden - turn on Show items with no name to list them"),
 								  static_cast<int>(sel.namelessFound - sel.namelessListed));
+					ImGuiMCP::PushTextWrapPos(0.0F);   // the item column is narrow; the line must wrap, not run off it
 					ImGuiMCP::TextDisabled("%s", hidden);
+					ImGuiMCP::PopTextWrapPos();
 				}
 
 				for (const auto* item : items) { DrawItemRow(*item, false); }

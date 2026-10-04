@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.1.4 - 2026-10-03 - untested
+## 1.1.4 - 2026-10-03 - working
 
 ### Added
 - **Show items with no name** (Browse page, beside Show quest items; INI `[General] bShowUnnamed`, default 0 = off). Many mods ship items with no in-game name, only an editor ID in the plugin file - EldenSkyrim.esp ("Elden Rim - Weapon") has 7 of its 8 weapons, 32 of its 35 armour pieces and all 14 of its books like that, and none of them were listed (binggo123 on Nexus, 2026-09-29: "some esps also cannot be displayed ... All of these can be displayed and extracted normally using AddItemMenu"). Skyrim SE keeps no editor ID in memory for most forms, so the catalogue skipped any item with neither a name nor an in-memory editor ID. Switched on, each such item is listed under the editor ID read from its plugin file on disk, with a greyed "(no name)" tag on its row, and can be searched, added and favourited like any other. Off by default because Skyrim.esm alone holds hundreds of nameless skins, tokens and test items. The switch is saved to the INI and re-reads the catalogue.
@@ -11,6 +11,7 @@
 - Four new strings in all eleven languages.
 
 ### Fixed
+- The new switch's hint and the hidden-items line wrap to the page instead of running off a narrow column.
 - Saving settings into an INI kept from an older version no longer drops a key that INI does not have yet: the key is written into its section (it used to log "key not found" and keep the value for the session only - rule 16).
 - Settings changed on the page are saved: the sort order and Show quest items at once, the preview pane's sliders when
   let go. Nothing on the page saved before, so they reset at every start (rule 16).
@@ -21,7 +22,10 @@
 - On: all 54 listed under the editor ID from the file, each with noName; ScarletKnight, the RealEbony set,
   EldenFist and AkatoshNote001 found; give:DB000A6A added the weapon ("catalog: added 1 x"); 3,548 nameless items
   in 115 plugins resolved in 87 ms; the new key was written into an older INI that lacked it.
-- NOT yet seen: the page itself (the switch, the "(no name)" tag, the hidden-items line) - the PC was locked.
+- Seen on the page (AMF's in-process capture, 1024x768): the switch on Browse, off by default; EldenSkyrim.esp lists
+  266 with it off and its view says "54 items here have no name and are hidden - turn on Show items with no name to
+  list them"; with it on the plugin lists 320. The switch's hint and the hidden-items line first ran off the narrow
+  column unwrapped - both now wrap to the page.
 
 ## 1.1.3 - 2026-10-03 - untested
 
