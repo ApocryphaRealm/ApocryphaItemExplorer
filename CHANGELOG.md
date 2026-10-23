@@ -1,5 +1,45 @@
 # Changelog
 
+## 1.2.0 - 2026-10-23 - untested
+
+### Added
+- **Item preview in the left pane** (the owner, 2026-10-23, adapting the Witcher 3 Item Explorer's card). A switch on the
+  Browse and Favourites pages. On, a card covers the framework's side list (the list of mods): the theme's frame
+  (AMF_DrawThemeFrame) around the whole left pane, the item's name, a SQUARE 3D preview at the top, and below it the
+  item's description when it has one - a book's text (its inventory line, else the start of the book), the effects of a
+  potion, ingredient, scroll or spell, an enchantment's effects, the item's own description - followed ALWAYS by its
+  inventory details: kind and plugin, armour rating and class, damage, speed, reach, critical damage, soul capacity and
+  the soul held, the spell or skill a book teaches, weight and value (the owner, 2026-10-23: "display the description
+  and its inventory information below the preview"). Off, the card is gone, the game unpauses and the model is released.
+- **The card follows the highlight.** Moving down the list with the D-pad updates it once the highlight has rested on a
+  row for 0.15 s, so holding the D-pad does not load a model for every row it passes. The controller's highlight wins
+  over a mouse that is only resting where it was left; a mouse that moves takes over until the highlight moves again.
+  Nothing to press: A on a row keeps its own action (Add, the star) and no longer fixes the preview.
+- The card is a real window brought to the front each frame, with no navigation and no focus when it appears, so
+  clicks and the wheel over it never reach the side list underneath and the highlight stays in the item list (a click
+  on the card hands the focus straight back). Dragging the model with the left mouse button turns it and the wheel zooms
+  it; long details scroll under the wheel; R3 still hands the model the sticks and circle gives them back.
+- New INI key `[General] bPreviewInLeftPane` (default 1): what the switch starts at each time the menu opens. The switch
+  itself is never saved, as the Witcher 3 Item Explorer's Show the selected item.
+- Needs **Apocrypha Menu Framework 2.3.0** (its new export AMF_GetSideListRect gives the side list's rectangle). An older
+  framework, or SKSE Menu Framework, keeps the whole page without the card; where the switch would be it says "Item
+  preview in the left pane needs Apocrypha Menu Framework 2.3.0".
+- DevBench: `op=leftpane:<0|1>` flips the switch; `op=leftpanestate` reports the switch, the side list's, card's and
+  square's screen rectangles, the row being rested on and the row shown, and what the details read.
+- 24 new strings in all eleven languages.
+
+### Changed
+- **Search every plugin is on by default** (the owner, 2026-10-23), so the page opens on one list instead of asking for a
+  plugin first.
+- A slow model gets ten seconds to finish loading before the capture gives up (was two).
+
+### Removed
+- The floating bottom-right preview box and its Pane across / Pane down / Pane size sliders - replaced by the card (one
+  way, not two). The INI keys `bShow3DPreview`, `fPaneX`, `fPaneY`, `fPaneSize` and `fPaneAlpha` are no longer read; an
+  old INI keeps them harmlessly. DevBench `op=pane:` is gone with them.
+- Clicking a row (or pressing A on its name) no longer fixes the item in the preview; turning and zooming no longer need
+  a fixed item.
+
 ## 1.1.4 - 2026-10-03 - working
 
 ### Added

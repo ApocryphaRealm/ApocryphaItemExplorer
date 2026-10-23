@@ -45,6 +45,9 @@ namespace preview
 		std::atomic<std::uint32_t> g_loads{ 0 }, g_renders{ 0 };
 		std::string g_lastError;
 		std::atomic<bool> g_openQueued{ false };
+		// The page's switch ("Item preview in the left pane"). Off: no heartbeat opens the helper menu, and an open one
+		// closes on its next frame, which unpauses the game and releases the model.
+		std::atomic<bool> g_enabled{ false };
 
 		// The engine's own switch for inventory 3D. Inventory3DManager::LoadInventoryItem's first
 		// instruction is a read of this Setting's value and it returns at once when it is off
@@ -103,7 +106,7 @@ namespace preview
 		// While the engine is still building the model there is nothing on screen to lift, so those
 		// frames must not count against the capture budget - but they cannot be waited on forever
 		// either, or a model that never builds would put the page back to rendering every frame.
-		constexpr int kWaitFrames = 120;   // about two seconds
+		constexpr int kWaitFrames = 600;   // about ten seconds (1.2.0: was two - a heavy model still loading past it never got a capture)
 		std::atomic<int> g_captureWaitLeft{ 0 };
 
 		// Where the player has turned the model to. Written on the page's thread by HandleMouse,
@@ -238,7 +241,7 @@ namespace preview
 			g_heartbeat = std::chrono::steady_clock::now();
 			g_heartbeatValid = true;
 		}
-		if (!settings::general::show3DPreview || !Available()) { return; }
+		if (!g_enabled.load() || !Available()) { return; }
 		if (PreviewMenuOpen() || g_openQueued.load()) { return; }
 		// The UI message queue belongs to the main thread; this is the framework's Present hook.
 		g_openQueued = true;
@@ -283,17 +286,14 @@ namespace preview
 		a_u1 = (x0 + w) / texW; a_v1 = (y0 + h) / texH;
 	}
 
-	bool PaneRect(float& a_x0, float& a_y0, float& a_x1, float& a_y1)
+	void SetEnabled(bool a_on)
 	{
-		ImGuiMCP::ImGuiIO* io = ImGuiMCP::GetIO();
-		if (!io || io->DisplaySize.x <= 0.0F || io->DisplaySize.y <= 0.0F) { return false; }
-		const float side = settings::preview::paneSize * io->DisplaySize.y;
-		const float cx = settings::preview::paneX * io->DisplaySize.x;
-		const float cy = settings::preview::paneY * io->DisplaySize.y;
-		a_x0 = cx - side * 0.5F; a_y0 = cy - side * 0.5F;
-		a_x1 = cx + side * 0.5F; a_y1 = cy + side * 0.5F;
-		return true;
+		if (g_enabled.exchange(a_on) == a_on) { return; }
+		logger::info("preview: left-pane preview {}", a_on ? "on" : "off - the helper menu closes, the game unpauses and the model is released");
+		if (!a_on) { EndHandling(); }
 	}
+
+	bool Enabled() { return g_enabled.load(); }
 
 	namespace
 	{
@@ -383,7 +383,7 @@ namespace preview
 
 	void HandleMouse(float a_x0, float a_y0, float a_x1, float a_y1)
 	{
-		if (!settings::general::show3DPreview) { return; }
+		if (!g_enabled.load()) { return; }
 		ImGuiMCP::ImGuiIO* io = ImGuiMCP::GetIO();
 		if (!io) { return; }
 
@@ -428,61 +428,23 @@ namespace preview
 		if (changed) { RequestCapture(); }
 	}
 
-	void DrawFloating(const char* a_title)
+	void DrawImage(void* a_drawList, float a_x0, float a_y0, float a_x1, float a_y1)
 	{
-		if (!settings::general::show3DPreview) { return; }
-		float x0 = 0.0F, y0 = 0.0F, x1 = 0.0F, y1 = 0.0F;
-		if (!PaneRect(x0, y0, x1, y1)) { return; }
-		ImGuiMCP::ImDrawList* dl = ImGuiMCP::GetForegroundDrawList();
-		if (!dl) { return; }
-
+		auto* dl = static_cast<ImGuiMCP::ImDrawList*>(a_drawList);
+		if (!dl || a_x1 <= a_x0 || a_y1 <= a_y0) { return; }
 		auto col = [](int r, int g, int b, int a) { return static_cast<ImGuiMCP::ImU32>((a << 24) | (b << 16) | (g << 8) | r); };
-		// Black behind, a white frame around, the model opaque in front, nothing faded (the owner,
-		// 2026-09-18).
-		const int alpha = static_cast<int>(std::clamp(settings::preview::paneAlpha, 0.1F, 1.0F) * 255.0F);
+		// The flat background first, then the model OPAQUE on top of it: the capture is cleared to transparent, so only
+		// the model's pixels land here (the owner, 2026-09-18: the model must not look hazy).
 		const auto bg = col(static_cast<int>(settings::preview::backgroundR * 255.0F), static_cast<int>(settings::preview::backgroundG * 255.0F),
-							static_cast<int>(settings::preview::backgroundB * 255.0F), alpha);
-		const ImGuiMCP::ImU32 kLine = col(255, 255, 255, 230);
-		const ImGuiMCP::ImU32 kText = col(255, 255, 255, 240);
-		const ImGuiMCP::ImU32 kDim = col(255, 255, 255, 150);
-
-		// The faded background first, then the model OPAQUE on top of it: the capture is cleared to
-		// transparent, so only the model's pixels land here (the owner, 2026-09-18: the model must
-		// not look hazy).
-		ImGuiMCP::ImDrawListManager::AddRectFilled(dl, ImGuiMCP::ImVec2{ x0, y0 }, ImGuiMCP::ImVec2{ x1, y1 }, bg, 0.0F, 0);
+							static_cast<int>(settings::preview::backgroundB * 255.0F), 255);
+		ImGuiMCP::ImDrawListManager::AddRectFilled(dl, ImGuiMCP::ImVec2{ a_x0, a_y0 }, ImGuiMCP::ImVec2{ a_x1, a_y1 }, bg, 0.0F, 0);
 		if (HasImage())
 		{
 			float u0 = 0.0F, v0 = 0.0F, u1 = 1.0F, v1 = 1.0F;
 			DisplayUV(u0, v0, u1, v1);
-			ImGuiMCP::ImDrawListManager::AddImage(dl, TextureID(), ImGuiMCP::ImVec2{ x0, y0 }, ImGuiMCP::ImVec2{ x1, y1 },
+			ImGuiMCP::ImDrawListManager::AddImage(dl, TextureID(), ImGuiMCP::ImVec2{ a_x0, a_y0 }, ImGuiMCP::ImVec2{ a_x1, a_y1 },
 												  ImGuiMCP::ImVec2{ u0, v0 }, ImGuiMCP::ImVec2{ u1, v1 }, col(255, 255, 255, 255));
 		}
-
-		// The framework's own theme frame - the Skyrim theme's Nordic knotwork (the owner, 2026-09-18:
-		// "apply the same Nordic knotwork that's in the Skyrim theme for AMF to this texture rendering
-		// frame") - through AMF_DrawThemeFrame (Apocrypha Menu Framework 1.8.9). A framework without the
-		// export, or a theme without a frame, gets a plain white line instead.
-		using DrawThemeFrame_t = bool (*)(void*, float, float, float, float);
-		static DrawThemeFrame_t s_themeFrame = GetMenuFrameworkFunction<DrawThemeFrame_t>("AMF_DrawThemeFrame");
-		if (!s_themeFrame || !s_themeFrame(dl, x0, y0, x1, y1))
-		{
-			ImGuiMCP::ImDrawListManager::AddLine(dl, ImGuiMCP::ImVec2{ x0, y0 }, ImGuiMCP::ImVec2{ x1, y0 }, kLine, 2.0F);
-			ImGuiMCP::ImDrawListManager::AddLine(dl, ImGuiMCP::ImVec2{ x1, y0 }, ImGuiMCP::ImVec2{ x1, y1 }, kLine, 2.0F);
-			ImGuiMCP::ImDrawListManager::AddLine(dl, ImGuiMCP::ImVec2{ x1, y1 }, ImGuiMCP::ImVec2{ x0, y1 }, kLine, 2.0F);
-			ImGuiMCP::ImDrawListManager::AddLine(dl, ImGuiMCP::ImVec2{ x0, y1 }, ImGuiMCP::ImVec2{ x0, y0 }, kLine, 2.0F);
-		}
-
-		// The caption sits INSIDE the box, along its top edge (the owner, 2026-09-18: it was
-		// spilling outside the bounds): the item's name, or what to do.
-		const char* caption = nullptr;
-		ImGuiMCP::ImU32 captionCol = kText;
-		if (!Available()) { caption = strings::TR("AIE_PreviewUnavailable", "The 3D preview is not available on this runtime."); captionCol = kDim; }
-		else if (a_title && a_title[0]) { caption = a_title; }
-		else { caption = strings::TR("AIE_PreviewPickARow", "Point at an item to see it here."); captionCol = kDim; }
-		// Centred across the box (the owner, 2026-09-18: "make the text centered in the 3D render box").
-		const ImGuiMCP::ImVec2 textSize = ImGuiMCP::CalcTextSize(caption, nullptr, false, -1.0F);
-		const float textX = (std::max)(x0 + 6.0F, (x0 + x1) * 0.5F - textSize.x * 0.5F);
-		ImGuiMCP::ImDrawListManager::AddText(dl, ImGuiMCP::ImVec2{ textX, y0 + 8.0F }, captionCol, caption, nullptr);
 	}
 
 	bool MenuShouldClose()
@@ -490,7 +452,7 @@ namespace preview
 		std::scoped_lock l(g_lock);
 		if (!g_heartbeatValid) { return true; }
 		const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - g_heartbeat).count();
-		return ms > kHeartbeatMs || !settings::general::show3DPreview;
+		return ms > kHeartbeatMs || !g_enabled.load();
 	}
 
 	void OnMenuShown()

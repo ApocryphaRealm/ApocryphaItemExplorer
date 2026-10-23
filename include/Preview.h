@@ -59,21 +59,20 @@ namespace preview
 	[[nodiscard]] bool HasImage();
 	void DisplayUV(float& a_u0, float& a_v0, float& a_u1, float& a_v1);
 
-	// The floating box: drawn on the framework's FOREGROUND draw list, so it sits in front of the
-	// framework window wherever the pane settings put it. The capture (or the flat background
-	// while nothing has landed), corner brackets and the caption above. Call every frame the page
-	// is drawn, after Heartbeat and Request. a_title is the item's name (may be null).
-	void DrawFloating(const char* a_title);
+	// THE LEFT-PANE CARD (1.2.0, the owner, 2026-10-23): the preview is drawn inside the page's card window, which
+	// covers the framework's side list while the "Item preview in the left pane" switch is on. The switch is the
+	// only way in or out: SetEnabled(false) closes the helper menu at once, which unpauses the game and releases the
+	// model. The old floating box (fPaneX/fPaneY/fPaneSize and its sliders) is gone - one way, not two.
+	void SetEnabled(bool a_on);
+	[[nodiscard]] bool Enabled();
 
-	// The box in display pixels, from the settings. False before the framework has drawn a frame.
-	// THE BOX TAKES THE MOUSE (the owner, 2026-09-19: "the user can use their mouse to select the
-	// item in the 3D rendering frame and move it around or zoom in by scrolling the wheel").
-	// Called once a frame by the page with the box's own rectangle:
-	//   left-drag   turns the model, the way the inventory turns one
-	//   right-drag  moves it inside the box
-	//   wheel       zooms, by changing how much of the game's render is lifted into the box
-	// The box is drawn on the framework's foreground list rather than inside a window, so there is
-	// no ImGui item to ask about hovering - the pointer is tested against the rectangle directly.
+	// The capture (or the flat background while nothing has landed) into a_x0..a_y1 on a_drawList (an ImDrawList*,
+	// the card window's own). The square is what the page shows; the capture is cropped to it with DisplayUV.
+	void DrawImage(void* a_drawList, float a_x0, float a_y0, float a_x1, float a_y1);
+
+	// The square TAKES THE MOUSE (the owner, 2026-09-19): hold the left button on the item and drag to turn it, the
+	// wheel zooms. Called once a frame by the page with the square's rectangle; the pointer is tested against it
+	// directly. A turn that started in the square keeps the mouse until the button comes up.
 	void HandleMouse(float a_x0, float a_y0, float a_x1, float a_y1);
 
 	// THE CONTROLLER (the owner, 2026-09-19: "controller should have press r3 while on the list item
@@ -93,7 +92,6 @@ namespace preview
 	// upright. Reset whenever the previewed item changes, so a new item is never shown face-down.
 	void ResetOrientation();
 
-	[[nodiscard]] bool PaneRect(float& a_x0, float& a_y0, float& a_x1, float& a_y1);
 
 	// ---- Called from the HELPER MENU (main thread, the game's own menu pass) --------------------
 

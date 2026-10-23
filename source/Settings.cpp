@@ -28,20 +28,16 @@ namespace settings
 			std::uint32_t logLevel;
 			std::uint32_t defaultCount;
 			bool          includeSpells;
-			bool          show3DPreview;
+			bool          previewInLeftPane;
 			bool          showQuestItems;
 			bool          showUnnamed;
 			std::uint32_t sortMode;
-			float         paneX;
-			float         paneY;
-			float         paneSize;
 			float         modelScale;
 			float         offsetX;
 			float         offsetY;
 			float         backgroundR;
 			float         backgroundG;
 			float         backgroundB;
-			float         paneAlpha;
 		} defaults{};
 
 		std::string Lower(std::string a_s)
@@ -118,38 +114,29 @@ namespace settings
 			get("uloglevel:debug", debug::logLevel, ParseUInt);
 			get("udefaultcount:general", general::defaultCount, ParseUInt);
 			get("bincludespells:general", general::includeSpells, ParseBool);
-			get("bshow3dpreview:general", general::show3DPreview, ParseBool);
+			get("bpreviewinleftpane:general", general::previewInLeftPane, ParseBool);
 			get("bshowquestitems:general", general::showQuestItems, ParseBool);
 			get("bshowunnamed:general", general::showUnnamed, ParseBool);
 			get("usortmode:general", general::sortMode, ParseUInt);
-			get("fpanex:preview", preview::paneX, ParseFloat);
-			get("fpaney:preview", preview::paneY, ParseFloat);
-			get("fpanesize:preview", preview::paneSize, ParseFloat);
 			get("fmodelscale:preview", preview::modelScale, ParseFloat);
 			get("foffsetx:preview", preview::offsetX, ParseFloat);
 			get("foffsety:preview", preview::offsetY, ParseFloat);
 			get("fbackgroundr:preview", preview::backgroundR, ParseFloat);
 			get("fbackgroundg:preview", preview::backgroundG, ParseFloat);
 			get("fbackgroundb:preview", preview::backgroundB, ParseFloat);
-			get("fpanealpha:preview", preview::paneAlpha, ParseFloat);
 			if (general::defaultCount == 0) { general::defaultCount = 1; }
-			preview::paneX = std::clamp(preview::paneX, 0.05F, 0.95F);
-			preview::paneY = std::clamp(preview::paneY, 0.05F, 0.95F);
-			preview::paneSize = std::clamp(preview::paneSize, 0.08F, 0.90F);
 			preview::modelScale = std::clamp(preview::modelScale, 0.2F, 4.0F);
 			preview::backgroundR = std::clamp(preview::backgroundR, 0.0F, 1.0F);
 			preview::backgroundG = std::clamp(preview::backgroundG, 0.0F, 1.0F);
 			preview::backgroundB = std::clamp(preview::backgroundB, 0.0F, 1.0F);
-			preview::paneAlpha = std::clamp(preview::paneAlpha, 0.1F, 1.0F);
 			// Clamped rather than trusted: an out-of-range sort index read from a hand-edited INI
 			// would index past the end of the mode table.
 			if (general::sortMode >= static_cast<std::uint32_t>(Catalog::Sort::kCount)) { general::sortMode = 0; }
-			logger::info("settings loaded from {}: defaultCount={} includeSpells={} preview3D={} "
+			logger::info("settings loaded from {}: defaultCount={} includeSpells={} leftPanePreview={} "
 						 "questItems={} showUnnamed={} sortMode={} logLevel={}",
-						 iniPath, general::defaultCount, general::includeSpells, general::show3DPreview,
+						 iniPath, general::defaultCount, general::includeSpells, general::previewInLeftPane,
 						 general::showQuestItems, general::showUnnamed, general::sortMode, debug::logLevel);
-			logger::info("preview box: centre ({:.2f}, {:.2f}) size {:.2f}, model scale {:.2f}, offset ({:.0f}, {:.0f})",
-						 preview::paneX, preview::paneY, preview::paneSize, preview::modelScale, preview::offsetX, preview::offsetY);
+			logger::info("preview: model scale {:.2f}, offset ({:.0f}, {:.0f})", preview::modelScale, preview::offsetX, preview::offsetY);
 			return true;
 		}
 
@@ -202,29 +189,25 @@ namespace settings
 		iniPath = (std::filesystem::current_path() / "Data" / "SKSE" / "Plugins" / a_iniFileName).string();
 
 		defaults = { debug::logLevel, general::defaultCount, general::includeSpells,
-					 general::show3DPreview, general::showQuestItems, general::showUnnamed, general::sortMode,
-					 preview::paneX, preview::paneY, preview::paneSize, preview::modelScale, preview::offsetX, preview::offsetY,
-					 preview::backgroundR, preview::backgroundG, preview::backgroundB, preview::paneAlpha };
+					 general::previewInLeftPane, general::showQuestItems, general::showUnnamed, general::sortMode,
+					 preview::modelScale, preview::offsetX, preview::offsetY,
+					 preview::backgroundR, preview::backgroundG, preview::backgroundB };
 
 		auto* collection = utils::INISettingCollection::GetSingleton();
 		collection->AddSettings(
 			utils::MakeSetting("uLogLevel:Debug", static_cast<unsigned int>(debug::logLevel)),
 			utils::MakeSetting("uDefaultCount:General", static_cast<unsigned int>(general::defaultCount)),
 			utils::MakeSetting("bIncludeSpells:General", general::includeSpells),
-			utils::MakeSetting("bShow3DPreview:General", general::show3DPreview),
+			utils::MakeSetting("bPreviewInLeftPane:General", general::previewInLeftPane),
 			utils::MakeSetting("bShowQuestItems:General", general::showQuestItems),
 			utils::MakeSetting("bShowUnnamed:General", general::showUnnamed),
 			utils::MakeSetting("uSortMode:General", static_cast<unsigned int>(general::sortMode)),
-			utils::MakeSetting("fPaneX:Preview", preview::paneX),
-			utils::MakeSetting("fPaneY:Preview", preview::paneY),
-			utils::MakeSetting("fPaneSize:Preview", preview::paneSize),
 			utils::MakeSetting("fModelScale:Preview", preview::modelScale),
 			utils::MakeSetting("fOffsetX:Preview", preview::offsetX),
 			utils::MakeSetting("fOffsetY:Preview", preview::offsetY),
 			utils::MakeSetting("fBackgroundR:Preview", preview::backgroundR),
 			utils::MakeSetting("fBackgroundG:Preview", preview::backgroundG),
-			utils::MakeSetting("fBackgroundB:Preview", preview::backgroundB),
-			utils::MakeSetting("fPaneAlpha:Preview", preview::paneAlpha));
+			utils::MakeSetting("fBackgroundB:Preview", preview::backgroundB));
 
 		LoadFileValues();
 	}
@@ -250,20 +233,16 @@ namespace settings
 		ok &= WriteKey(lines, "Debug", "uLogLevel", std::to_string(debug::logLevel));
 		ok &= WriteKey(lines, "General", "uDefaultCount", std::to_string(general::defaultCount));
 		ok &= WriteKey(lines, "General", "bIncludeSpells", general::includeSpells ? "1" : "0");
-		ok &= WriteKey(lines, "General", "bShow3DPreview", general::show3DPreview ? "1" : "0");
+		ok &= WriteKey(lines, "General", "bPreviewInLeftPane", general::previewInLeftPane ? "1" : "0");
 		ok &= WriteKey(lines, "General", "bShowQuestItems", general::showQuestItems ? "1" : "0");
 		ok &= WriteKey(lines, "General", "bShowUnnamed", general::showUnnamed ? "1" : "0");
 		ok &= WriteKey(lines, "General", "uSortMode", std::to_string(general::sortMode));
-		ok &= WriteKey(lines, "Preview", "fPaneX", FloatText(preview::paneX));
-		ok &= WriteKey(lines, "Preview", "fPaneY", FloatText(preview::paneY));
-		ok &= WriteKey(lines, "Preview", "fPaneSize", FloatText(preview::paneSize));
 		ok &= WriteKey(lines, "Preview", "fModelScale", FloatText(preview::modelScale));
 		ok &= WriteKey(lines, "Preview", "fOffsetX", FloatText(preview::offsetX));
 		ok &= WriteKey(lines, "Preview", "fOffsetY", FloatText(preview::offsetY));
 		ok &= WriteKey(lines, "Preview", "fBackgroundR", FloatText(preview::backgroundR));
 		ok &= WriteKey(lines, "Preview", "fBackgroundG", FloatText(preview::backgroundG));
 		ok &= WriteKey(lines, "Preview", "fBackgroundB", FloatText(preview::backgroundB));
-		ok &= WriteKey(lines, "Preview", "fPaneAlpha", FloatText(preview::paneAlpha));
 
 		std::ofstream out(iniPath, std::ios::trunc);
 		if (!out) { logger::error("Save: could not open {} for writing", iniPath); return false; }
@@ -277,20 +256,16 @@ namespace settings
 		debug::logLevel = defaults.logLevel;
 		general::defaultCount = defaults.defaultCount;
 		general::includeSpells = defaults.includeSpells;
-		general::show3DPreview = defaults.show3DPreview;
+		general::previewInLeftPane = defaults.previewInLeftPane;
 		general::showQuestItems = defaults.showQuestItems;
 		general::showUnnamed = defaults.showUnnamed;
 		general::sortMode = defaults.sortMode;
-		preview::paneX = defaults.paneX;
-		preview::paneY = defaults.paneY;
-		preview::paneSize = defaults.paneSize;
 		preview::modelScale = defaults.modelScale;
 		preview::offsetX = defaults.offsetX;
 		preview::offsetY = defaults.offsetY;
 		preview::backgroundR = defaults.backgroundR;
 		preview::backgroundG = defaults.backgroundG;
 		preview::backgroundB = defaults.backgroundB;
-		preview::paneAlpha = defaults.paneAlpha;
 		ApplyLogLevel();
 	}
 

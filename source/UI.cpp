@@ -7,6 +7,7 @@
 #include "Catalog.h"
 #include "PreciseSlider.h"
 #include "Favourites.h"
+#include "ItemInfo.h"
 #include "Preview.h"
 #include "Settings.h"
 
@@ -18,6 +19,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -85,15 +87,25 @@ namespace UI
 		const Catalog::Item* g_hoverItem = nullptr;
 		const Catalog::Item* g_focusItem = nullptr;
 
-		// THE FIXED ITEM (the owner, 2026-09-19): "the mouse should select the list item which fixes
-		// the item to the preview and then they can zoom and rotate ... but rotate and zoom only on
-		// activating the item with a click". Two states, not one:
-		//   nothing fixed - the preview FOLLOWS the mouse, so you can see what you scroll past, and
-		//                   turning and zooming do nothing (there is nothing to take hold of);
-		//   fixed         - the clicked item stays in the pane whatever the mouse passes over, and
-		//                   the mouse and the sticks can handle it.
-		// Clicking another row moves the fix to that row; R3 on the pad does the same thing.
-		const Catalog::Item* g_fixedItem = nullptr;
+		// THE LEFT-PANE PREVIEW (1.2.0, the owner, 2026-10-23). A switch on Browse and Favourites, "Item preview in the
+		// left pane": on, a card covers the framework's side list - a square 3D preview at the top, the item's description
+		// and inventory details below - and it FOLLOWS the highlight: moving down the list updates it once the highlight
+		// has rested on a row for kFollowRest, so holding the D-pad does not start a model load for every row it passes
+		// (the Witcher 3 Item Explorer's kFollowRest). Nothing to press: A keeps its own action and fixes nothing (the
+		// 1.1.1 click-to-fix is gone). The switch starts at bPreviewInLeftPane each time the menu opens and is never saved.
+		bool                 g_leftPane = true;
+		std::atomic<int>     g_toolLeftPane{ -1 };      // DevBench op=leftpane:<0|1>, applied on the page's next frame
+		constexpr double     kFollowRest = 0.15;
+		const Catalog::Item* g_candidate = nullptr;      // the row the highlight (or the moving mouse) is on now
+		double               g_candidateSince = 0.0;
+		const Catalog::Item* g_lastFocus = nullptr;      // last frame's highlighted row, to see the highlight move
+		// CONTROLLER FOCUS BEATS A RESTING MOUSE: whichever moved last decides. A mouse that has not moved since the
+		// D-pad did is only resting where the player left it, and must not pull the preview back to the row under it.
+		bool                 g_mouseLeads = false;
+		ImGuiMCP::ImGuiWindow* g_pageWindow = nullptr;   // the page's window, to hand the focus back to from the card
+		// for the DevBench tool: where the card, the side list and the square were last frame
+		std::atomic<float>   g_cardRect[4]{}, g_sideRect[4]{}, g_squareRect[4]{};
+		std::atomic<bool>    g_cardDrawn{ false };
 
 		// The Favourites page's save confirmation.
 		bool  g_favSaved = false;
@@ -117,7 +129,8 @@ namespace UI
 		{
 			return a_item.formID == kGoldFormID;
 		}
-		bool        g_searchEverywhere = false;
+		// One list across every plugin by default (the owner, 2026-10-23), instead of making the player pick a plugin first.
+		bool        g_searchEverywhere = true;
 		// Skyrim ships hundreds of enchanted variants of every base weapon and armour piece,
 		// and they bury what a plugin actually adds. Off by default for that reason.
 		bool        g_showEnchanted = false;
@@ -161,10 +174,9 @@ namespace UI
 			"igGetContentRegionAvail", "igGetCursorPosX",
 			"igInvisibleButton", "igIsItemHovered",
 			"ImDrawList_AddRectFilled", "ImDrawList_AddCircleFilled",
-			// the 3D preview's floating box: its frame, caption and picture are drawn on the framework's
-			// SCREEN-WIDE foreground list, which arrived in Apocrypha Menu Framework 1.5.8.
-			// A framework older than that is refused here rather than met with a null call.
-			"igGetIO", "igGetForegroundDrawList_Nil",
+			// the 3D preview's picture, line frame and the input it reads (1.2.0: drawn in the left-pane card's window,
+			// whose own extra calls are checked separately in kLeftPaneExports)
+			"igGetIO",
 			"ImDrawList_AddLine", "ImDrawList_AddText_Vec2",
 			"igSliderFloat", "igSliderInt", "igIsKeyDown_Nil", "igIsMouseDown_Nil", "igCombo_Str_arr",
 			// 1.0.7: the 3D preview pane is an image of the engine's own render, and the row under
@@ -287,7 +299,8 @@ namespace UI
 			s_generation = now;
 
 			g_previewItem = nullptr;
-			g_fixedItem = nullptr;
+			g_candidate = nullptr;
+			g_lastFocus = nullptr;
 			g_refocusItem = nullptr;
 			g_hoverItem = nullptr;
 			g_focusItem = nullptr;
@@ -315,28 +328,11 @@ namespace UI
 				ImGuiMCP::SetKeyboardFocusHere(-1);
 				g_refocusItem = nullptr;
 			}
-			// HOVER BEATS FOCUS, AND ONLY ONE OF THEM WINS PER FRAME (2026-09-19).
-			//
-			// This used to set the previewed item when a row was hovered OR focused, with no
-			// precedence - so the controller's focus (which stays where it was left) and the mouse's
-			// hover both claimed it every frame and whichever row was drawn last won. Clicking a row
-			// with the mouse therefore did nothing: the preview snapped back to whatever the D-pad
-			// had last selected (the owner, 2026-09-19: "it just goes back to whatever I last
-			// selected with controller"). Worse, the two fought frame by frame, so the requested
-			// item CHANGED every frame - which unloads and reloads the engine's model continuously
-			// and never lets a capture finish, which is why items "appear for an instant and then
-			// they're gone".
-			//
-			// The rule now: if the mouse is over any row this frame, the mouse decides; otherwise
-			// the highlight does. Recorded per frame and applied after the list is drawn.
-			if (ImGuiMCP::IsItemHovered())
-			{
-				g_hoverItem = &a_item;
-				// A click anywhere on the row fixes it - the Add button, the star, the name. The
-				// button's own action still happens; fixing is in addition to it, not instead.
-				if (auto* io = ImGuiMCP::GetIO(); io && io->MouseClicked[0]) { g_fixedItem = &a_item; }
-			}
-			else if (ImGuiMCP::IsItemFocused() && g_focusItem == nullptr) { g_focusItem = &a_item; }
+			// ONE WINNER PER FRAME (2026-09-19): the rows only RECORD what is hovered and what has the highlight; which of
+			// the two drives the preview is decided once, after the list (ResolvePreview), so the request never changes
+			// several times within a frame - that unloads and reloads the engine's model and no capture ever lands.
+			if (ImGuiMCP::IsItemHovered()) { g_hoverItem = &a_item; }
+			if (ImGuiMCP::IsItemFocused() && g_focusItem == nullptr) { g_focusItem = &a_item; }
 
 			// R3 ON THE HIGHLIGHTED ROW hands the preview box the sticks (the owner, 2026-09-19).
 			// Asked of the row that has the highlight, so the item being handled is the one the
@@ -346,40 +342,209 @@ namespace UI
 				ImGuiMCP::IsKeyPressed(ImGuiMCP::ImGuiKey_GamepadR3, false))
 			{
 				g_previewItem = &a_item;
-				g_fixedItem = &a_item;   // R3 is the controller's "click": it fixes the item too
+				g_candidate = &a_item;
 				preview::BeginHandling();
 			}
 		}
 
-		// The floating preview box: the heartbeat that keeps the helper menu open, the request for
-		// whatever row is under the cursor, and the box itself, drawn in front of this window. One
-		// call at the end of each page's render.
-		void DrawPreviewFloating()
+		// What the left-pane card needs from the framework, over and above kRequired: the side list's rectangle
+		// (Apocrypha Menu Framework 2.3.0, AMF_GetSideListRect) and the calls that make the card a real window in front
+		// of that list, so a click or a turn of the wheel over it never reaches the list underneath. Checked once; a
+		// framework without any of them gets the page without the card and a one-line note where the switch would be.
+		constexpr const char* kLeftPaneExports[] = {
+			"AMF_GetSideListRect",
+			"igBegin", "igEnd", "igSetNextWindowPos", "igSetNextWindowSize", "igSetNextWindowBgAlpha",
+			"igBringWindowToDisplayFront", "igGetCurrentWindow", "igFocusWindow", "igIsWindowFocused",
+			"igGetWindowPos", "igGetWindowSize", "igPushStyleVar_Float", "igPushStyleVar_Vec2", "igPopStyleVar",
+			"igPushStyleColor_Vec4", "igPopStyleColor", "igGetStyleColorVec4", "igGetTime", "igGetFrameCount",
+			"igSetCursorScreenPos", "igTextUnformatted", "igGetTextLineHeightWithSpacing"
+		};
+
+		using GetSideListRect_t = bool (*)(float*, float*, float*, float*);
+
+		bool LeftPaneSupported()
 		{
-			// One winner for the frame. Doing this here, after the rows, is what stops the request
-			// changing several times within a single frame.
-			if (g_fixedItem) { g_previewItem = g_fixedItem; }
-			else if (g_hoverItem) { g_previewItem = g_hoverItem; }
-			else if (g_focusItem) { g_previewItem = g_focusItem; }
+			static const bool s_ok = [] {
+				for (const char* name : kLeftPaneExports)
+				{
+					if (!GetMenuFrameworkFunction<void*>(name))
+					{
+						logger::info("left-pane preview: the loaded menu framework does not export \"{}\" - the switch is "
+									 "hidden (needs Apocrypha Menu Framework 2.3.0)", name);
+						return false;
+					}
+				}
+				logger::info("left-pane preview: the framework has the side list's rectangle and every window call the card needs");
+				return true;
+			}();
+			return s_ok;
+		}
+
+		bool SideListRect(float& a_x0, float& a_y0, float& a_x1, float& a_y1)
+		{
+			static GetSideListRect_t fn = GetMenuFrameworkFunction<GetSideListRect_t>("AMF_GetSideListRect");
+			return fn && fn(&a_x0, &a_y0, &a_x1, &a_y1);
+		}
+
+		// Once at the top of each page's render: notice a reopened menu (a gap in the frames the page was drawn),
+		// remember the page's window, and apply a DevBench request.
+		void NotePage()
+		{
+			static int s_lastFrame = -10;
+			const int frame = LeftPaneSupported() ? ImGuiMCP::GetFrameCount() : 0;
+			if (LeftPaneSupported() && s_lastFrame != frame && s_lastFrame < frame - 1)
+			{
+				// the switch goes back to the INI's default each time the menu opens (the owner, 2026-10-23, as the
+				// Witcher 3 Item Explorer's Show the selected item does)
+				if (g_leftPane != settings::general::previewInLeftPane)
+				{
+					logger::info("page: Item preview in the left pane - {} (the menu was opened)",
+								 settings::general::previewInLeftPane ? "on" : "off");
+				}
+				g_leftPane = settings::general::previewInLeftPane;
+				g_candidate = nullptr;
+				g_lastFocus = nullptr;
+				g_mouseLeads = false;
+			}
+			s_lastFrame = frame;
+			if (const int req = g_toolLeftPane.exchange(-1); req >= 0) { g_leftPane = req == 1; }
+			g_pageWindow = LeftPaneSupported() ? ImGuiMCP::GetCurrentWindow() : nullptr;
+		}
+
+		// The switch, on both pages: "Item preview in the left pane", or the note that the framework is too old.
+		void DrawLeftPaneSwitch()
+		{
+			if (!LeftPaneSupported())
+			{
+				ImGuiMCP::TextDisabled("%s", strings::TR("AIE_LeftPaneNeeds", "Item preview in the left pane needs Apocrypha Menu Framework 2.3.0"));
+				return;
+			}
+			ImGuiMCP::Toggle(strings::TR("AIE_LeftPane", "Item preview in the left pane"), &g_leftPane);
+		}
+
+		// After the rows: which row the preview follows. The highlight wins unless the mouse moved more recently; a
+		// new row is taken once it has been the candidate for kFollowRest.
+		void ResolvePreview()
+		{
+			const Catalog::Item* hover = g_hoverItem;
+			const Catalog::Item* focus = g_focusItem;
 			g_hoverItem = nullptr;
 			g_focusItem = nullptr;
 
-			if (!settings::general::show3DPreview || !preview::Available())
+			if (auto* io = ImGuiMCP::GetIO())
 			{
-				// The box is gone; it cannot still be holding the pad.
-				preview::EndHandling();
+				if (io->MouseDelta.x != 0.0F || io->MouseDelta.y != 0.0F || io->MouseClicked[0]) { g_mouseLeads = true; }
+			}
+			if (focus && focus != g_lastFocus) { g_mouseLeads = false; }   // the highlight moved: the controller leads
+			g_lastFocus = focus;
+
+			// while the sticks turn the model the highlight cannot move, and the previewed item stays
+			if (preview::Handling()) { return; }
+
+			const Catalog::Item* want = g_mouseLeads ? hover : focus;
+			if (want && want != g_candidate)
+			{
+				g_candidate = want;
+				g_candidateSince = LeftPaneSupported() ? ImGuiMCP::GetTime() : 0.0;
+			}
+			if (g_candidate && g_candidate != g_previewItem &&
+				(!LeftPaneSupported() || ImGuiMCP::GetTime() - g_candidateSince >= kFollowRest))
+			{
+				g_previewItem = g_candidate;
+			}
+		}
+
+		ImGuiMCP::ImU32 Col(int r, int g, int b, int a) { return static_cast<ImGuiMCP::ImU32>((a << 24) | (b << 16) | (g << 8) | r); }
+
+		const char* SoulName(int a_level)
+		{
+			switch (a_level)
+			{
+			case 1:  return strings::TR("AIE_Soul1", "Petty");
+			case 2:  return strings::TR("AIE_Soul2", "Lesser");
+			case 3:  return strings::TR("AIE_Soul3", "Common");
+			case 4:  return strings::TR("AIE_Soul4", "Greater");
+			case 5:  return strings::TR("AIE_Soul5", "Grand");
+			default: return strings::TR("AIE_SoulNone", "empty");
+			}
+		}
+
+		// Below the square: the description when the item has one, then always its inventory details (the owner,
+		// 2026-10-23: "display the description and its inventory information below the preview").
+		void DrawItemDetails(const Catalog::Item& a_item)
+		{
+			iteminfo::Request(a_item.form);
+			const iteminfo::Info info = iteminfo::Current();
+			if (!info.ready)
+			{
+				ImGuiMCP::TextDisabled("%s", strings::TR("AIE_Reading", "Reading..."));
 				return;
 			}
-			float x0 = 0.0F, y0 = 0.0F, x1 = 0.0F, y1 = 0.0F;
-			if (!preview::PaneRect(x0, y0, x1, y1)) { return; }
-			// The box takes the mouse before anything is drawn, so a turn or a zoom asked for this
-			// frame is already in the capture this frame produces.
-			// Turning and zooming need a FIXED item. While the preview is merely following the
-			// mouse there is nothing to take hold of, and letting the wheel zoom a preview that is
-			// about to change under it reads as the controls being broken.
-			if (g_fixedItem) { preview::HandleMouse(x0, y0, x1, y1); }
-			// The controller's turn at the box: the sticks while it has them, circle to give them
-			// back and go on navigating the list from the row the highlight never left.
+			ImGuiMCP::PushTextWrapPos(0.0F);
+			bool any = false;
+			if (!info.description.empty())
+			{
+				ImGuiMCP::TextUnformatted(info.description.c_str());
+				any = true;
+			}
+			for (const auto& line : info.effects)
+			{
+				ImGuiMCP::TextUnformatted(line.c_str());
+				any = true;
+			}
+			if (any) { ImGuiMCP::Separator(); }
+
+			// the inventory's own figures
+			const auto& plugins = Catalog::Plugins();
+			ImGuiMCP::TextDisabled("%s - %s", KindLabel(a_item.kind),
+								   a_item.pluginIndex < plugins.size() ? plugins[a_item.pluginIndex].fileName.c_str() : "?");
+			if (info.armorRating >= 0.0F)
+			{
+				const char* cls = info.armorClass == iteminfo::ArmorClass::kHeavy  ? strings::TR("AIE_ArmorHeavy", "Heavy armor")
+								: info.armorClass == iteminfo::ArmorClass::kLight  ? strings::TR("AIE_ArmorLight", "Light armor")
+																				   : strings::TR("AIE_Clothing", "Clothing");
+				ImGuiMCP::Text("%s %.0f    %s", strings::TR("AIE_ArmorRating", "Armor rating"), info.armorRating, cls);
+			}
+			if (info.damage >= 0) { ImGuiMCP::Text("%s %d", strings::TR("AIE_Damage", "Damage"), info.damage); }
+			if (info.speed >= 0.0F)
+			{
+				ImGuiMCP::Text("%s %.2f    %s %.2f", strings::TR("AIE_Speed", "Speed"), info.speed,
+							   strings::TR("AIE_Reach", "Reach"), info.reach);
+			}
+			if (info.critDamage >= 0) { ImGuiMCP::Text("%s %d", strings::TR("AIE_CritDamage", "Critical damage"), info.critDamage); }
+			if (info.soulCapacity >= 0)
+			{
+				ImGuiMCP::Text("%s: %s    %s: %s", strings::TR("AIE_SoulCapacity", "Soul capacity"), SoulName(info.soulCapacity),
+							   strings::TR("AIE_SoulHeld", "Soul held"), SoulName(info.soulHeld));
+			}
+			if (!info.teachesSpell.empty()) { ImGuiMCP::Text("%s: %s", strings::TR("AIE_TeachesSpell", "Teaches the spell"), info.teachesSpell.c_str()); }
+			if (!info.teachesSkill.empty()) { ImGuiMCP::Text("%s: %s", strings::TR("AIE_TeachesSkill", "Teaches the skill"), info.teachesSkill.c_str()); }
+			char value[32] = "-";
+			if (a_item.value >= 0) { std::snprintf(value, sizeof(value), "%d", a_item.value); }
+			ImGuiMCP::Text("%s %.1f    %s %s", strings::TR("AIE_Weight", "Weight"), a_item.weight, strings::TR("AIE_Value", "Value"), value);
+			if (a_item.questItem) { ImGuiMCP::TextDisabled("%s", strings::TR("AIE_QuestTag", "[quest]")); }
+			ImGuiMCP::TextDisabled("%s  0x%08X", a_item.editorID.c_str(), a_item.formID);
+			ImGuiMCP::PopTextWrapPos();
+		}
+
+		// THE CARD, once at the end of each page's render. Off (or a framework without the side list's rectangle): the
+		// helper menu is told to close, which unpauses the game and releases the model.
+		void DrawLeftPane()
+		{
+			ResolvePreview();
+			g_cardDrawn = false;
+
+			if (!LeftPaneSupported() || !g_leftPane || !preview::Available())
+			{
+				preview::SetEnabled(false);
+				return;
+			}
+			float sx0 = 0.0F, sy0 = 0.0F, sx1 = 0.0F, sy1 = 0.0F;
+			if (!SideListRect(sx0, sy0, sx1, sy1)) { return; }   // no list drawn this frame: no heartbeat, the menu closes shortly
+			g_sideRect[0] = sx0; g_sideRect[1] = sy0; g_sideRect[2] = sx1; g_sideRect[3] = sy1;
+			preview::SetEnabled(true);
+
+			// the controller's turn at the model: the sticks while it has them, circle gives them back
 			if (preview::Handling())
 			{
 				preview::HandleController();
@@ -389,36 +554,96 @@ namespace UI
 					g_refocusItem = g_previewItem;   // put the highlight back where it was
 				}
 			}
-			preview::Heartbeat();
-			preview::Request(g_previewItem && g_previewItem->form ? g_previewItem->form : nullptr, x1 - x0, y1 - y0);
-			const char* title = nullptr;
-			if (g_previewItem) { title = g_previewItem->name.empty() ? g_previewItem->editorID.c_str() : g_previewItem->name.c_str(); }
-			preview::DrawFloating(title);
-		}
 
-		// Where the box sits: the earlier version's sliders (the owner, 2026-09-18: the SkyHUD
-		// Settings Menu way of moving things - a position you set, shown live).
-		void DrawPreviewSettings()
-		{
-			if (!settings::general::show3DPreview) { return; }
-			ImGuiMCP::TextDisabled("%s", strings::TR("AIE_PreviewWhere", "Where the preview box sits - it floats in front of this window, so put it anywhere"));
-			ImGuiMCP::PushItemWidth(220.0F);
-			// saved when a slider is let go (or after a nudge), never once per frame of a drag
-			static bool s_paneDirty = false;
-			s_paneDirty |= precise::SliderFloat(strings::TR("AIE_PreviewX", "Pane across"), &settings::preview::paneX, 0.05F, 0.95F, "%.2f");
-			s_paneDirty |= precise::SliderFloat(strings::TR("AIE_PreviewY", "Pane down"), &settings::preview::paneY, 0.05F, 0.95F, "%.2f");
-			s_paneDirty |= precise::SliderFloat(strings::TR("AIE_PreviewSize", "Pane size"), &settings::preview::paneSize, 0.08F, 0.90F, "%.2f");
-			if (s_paneDirty && !ImGuiMCP::IsAnyItemActive())
+			// A REAL WINDOW over the side list, brought to the front every frame: the list underneath never sees a click
+			// or the wheel over it. No navigation and no focus when it appears - the highlight stays in the item list.
+			ImGuiMCP::SetNextWindowPos(ImGuiMCP::ImVec2{ sx0, sy0 }, ImGuiMCP::ImGuiCond_Always);
+			ImGuiMCP::SetNextWindowSize(ImGuiMCP::ImVec2{ sx1 - sx0, sy1 - sy0 }, ImGuiMCP::ImGuiCond_Always);
+			ImGuiMCP::PushStyleVar(ImGuiMCP::ImGuiStyleVar_WindowBorderSize, 0.0F);
+			ImGuiMCP::PushStyleVar(ImGuiMCP::ImGuiStyleVar_WindowPadding, ImGuiMCP::ImVec2{ 14.0F, 12.0F });
+			ImGuiMCP::ImVec4 bg{ 0.06F, 0.06F, 0.06F, 1.0F };
+			if (const ImGuiMCP::ImVec4* themed = ImGuiMCP::GetStyleColorVec4(ImGuiMCP::ImGuiCol_WindowBg)) { bg = *themed; }
+			bg.w = 1.0F;   // opaque: the side list must not show through
+			ImGuiMCP::PushStyleColor(ImGuiMCP::ImGuiCol_WindowBg, bg);
+			ImGuiMCP::SetNextWindowBgAlpha(1.0F);
+			const ImGuiMCP::ImGuiWindowFlags flags =
+				ImGuiMCP::ImGuiWindowFlags_NoTitleBar | ImGuiMCP::ImGuiWindowFlags_NoResize | ImGuiMCP::ImGuiWindowFlags_NoMove |
+				ImGuiMCP::ImGuiWindowFlags_NoCollapse | ImGuiMCP::ImGuiWindowFlags_NoSavedSettings | ImGuiMCP::ImGuiWindowFlags_NoDocking |
+				ImGuiMCP::ImGuiWindowFlags_NoScrollbar | ImGuiMCP::ImGuiWindowFlags_NoScrollWithMouse |
+				ImGuiMCP::ImGuiWindowFlags_NoNav | ImGuiMCP::ImGuiWindowFlags_NoFocusOnAppearing;
+			if (ImGuiMCP::Begin("##aie_leftpane", nullptr, flags))
 			{
-				s_paneDirty = false;
-				settings::Save();
+				ImGuiMCP::BringWindowToDisplayFront(ImGuiMCP::GetCurrentWindow());
+				ImGuiMCP::ImDrawList* dl = ImGuiMCP::GetWindowDrawList();
+				const ImGuiMCP::ImVec2 wp = ImGuiMCP::GetWindowPos();
+				const ImGuiMCP::ImVec2 ws = ImGuiMCP::GetWindowSize();
+				g_cardRect[0] = wp.x; g_cardRect[1] = wp.y; g_cardRect[2] = wp.x + ws.x; g_cardRect[3] = wp.y + ws.y;
+
+				// the framework's theme frame around the whole card (AMF_DrawThemeFrame), else a plain white line
+				using DrawThemeFrame_t = bool (*)(void*, float, float, float, float);
+				static DrawThemeFrame_t s_themeFrame = GetMenuFrameworkFunction<DrawThemeFrame_t>("AMF_DrawThemeFrame");
+				if (!s_themeFrame || !s_themeFrame(dl, wp.x, wp.y, wp.x + ws.x, wp.y + ws.y))
+				{
+					const auto line = Col(255, 255, 255, 230);
+					ImGuiMCP::ImDrawListManager::AddLine(dl, ImGuiMCP::ImVec2{ wp.x, wp.y }, ImGuiMCP::ImVec2{ wp.x + ws.x, wp.y }, line, 2.0F);
+					ImGuiMCP::ImDrawListManager::AddLine(dl, ImGuiMCP::ImVec2{ wp.x + ws.x, wp.y }, ImGuiMCP::ImVec2{ wp.x + ws.x, wp.y + ws.y }, line, 2.0F);
+					ImGuiMCP::ImDrawListManager::AddLine(dl, ImGuiMCP::ImVec2{ wp.x + ws.x, wp.y + ws.y }, ImGuiMCP::ImVec2{ wp.x, wp.y + ws.y }, line, 2.0F);
+					ImGuiMCP::ImDrawListManager::AddLine(dl, ImGuiMCP::ImVec2{ wp.x, wp.y + ws.y }, ImGuiMCP::ImVec2{ wp.x, wp.y }, line, 2.0F);
+				}
+
+				const Catalog::Item* item = g_previewItem;
+				// the heading: the item's name, wrapped to the card
+				ImGuiMCP::PushTextWrapPos(0.0F);
+				if (item) { ImGuiMCP::TextUnformatted(item->name.empty() ? item->editorID.c_str() : item->name.c_str()); }
+				else { ImGuiMCP::TextDisabled("%s", strings::TR("AIE_PreviewPickARow", "Point at an item to see it here.")); }
+				ImGuiMCP::PopTextWrapPos();
+
+				// THE SQUARE: as wide as the card, unless that would leave the details too little room
+				const ImGuiMCP::ImVec2 avail = ImGuiMCP::GetContentRegionAvail();
+				const float side = (std::max)(64.0F, (std::min)(avail.x, avail.y * 0.62F));
+				const ImGuiMCP::ImVec2 at = ImGuiMCP::GetCursorScreenPos();
+				const float qx0 = at.x + (avail.x - side) * 0.5F, qy0 = at.y;
+				const float qx1 = qx0 + side, qy1 = qy0 + side;
+				g_squareRect[0] = qx0; g_squareRect[1] = qy0; g_squareRect[2] = qx1; g_squareRect[3] = qy1;
+				// an invisible button under the square, so a drag on the model is an active item (the card keeps the
+				// mouse for the whole turn, and the focus is not handed back in the middle of it)
+				ImGuiMCP::SetCursorScreenPos(ImGuiMCP::ImVec2{ qx0, qy0 });
+				ImGuiMCP::InvisibleButton("##aie_model", ImGuiMCP::ImVec2{ side, side }, 0);
+				if (item) { preview::HandleMouse(qx0, qy0, qx1, qy1); }
+				preview::Heartbeat();
+				preview::Request(item && item->form ? item->form : nullptr, side, side);
+				preview::DrawImage(dl, qx0, qy0, qx1, qy1);
+				if (!preview::Available())
+				{
+					ImGuiMCP::TextDisabled("%s", strings::TR("AIE_PreviewUnavailable", "The 3D preview is not available on this runtime."));
+				}
+
+				// below the square: the description and the inventory details, scrolled by the wheel when long
+				ImGuiMCP::SetCursorScreenPos(ImGuiMCP::ImVec2{ at.x, qy1 + 8.0F });
+				if (ImGuiMCP::BeginChild("##aie_details", ImGuiMCP::ImVec2{ 0.0F, 0.0F }, 0,
+										 ImGuiMCP::ImGuiWindowFlags_NoNav))
+				{
+					if (item) { DrawItemDetails(*item); }
+					ImGuiMCP::Spacing();
+					ImGuiMCP::PushTextWrapPos(0.0F);
+					ImGuiMCP::TextDisabled("%s", strings::TR("AIE_LeftPaneTurnHint",
+										   "Drag the item with the left mouse button to turn it; the wheel zooms. On a controller, R3 hands it the sticks and circle gives them back."));
+					ImGuiMCP::PopTextWrapPos();
+				}
+				ImGuiMCP::EndChild();
+
+				// the card never keeps the focus: a click on it (once a drag of the model ends) hands it straight back
+				// to the page, so the highlight stays where it was
+				if (g_pageWindow && ImGuiMCP::IsWindowFocused(ImGuiMCP::ImGuiFocusedFlags_RootAndChildWindows) &&
+					!ImGuiMCP::IsAnyItemActive())
+				{
+					ImGuiMCP::FocusWindow(g_pageWindow, 0);
+				}
+				g_cardDrawn = true;
 			}
-			ImGuiMCP::PopItemWidth();
-			ImGuiMCP::TextDisabled("%s", strings::TR("AIE_PreviewMouseHint",
-								   "Click an item in the list to fix it here - then hold the left mouse button on it to turn it, and scroll the wheel to zoom. Without a click the preview just follows the mouse."));
-			ImGuiMCP::TextDisabled("%s", strings::TR("AIE_PreviewPadHint",
-								   "Controller: press R3 on an item to take hold of it - the left stick turns it, the right "
-								   "stick zooms, and circle lets go and puts you back on the list."));
+			ImGuiMCP::End();
+			ImGuiMCP::PopStyleColor();
+			ImGuiMCP::PopStyleVar(2);
 		}
 
 		void DrawItemRow(const Catalog::Item& a_item, bool a_showPlugin)
@@ -493,19 +718,16 @@ namespace UI
 											   : strings::TR("AIE_FavAddTip", "Add to favourites"));
 			}
 
-			// THE NAME IS A CONTROL, NOT TEXT (the owner, 2026-09-20). It spans the rest of the row, so a
-			// click anywhere right of the star - on the name or on the grey details drawn over it - lands
-			// on this Selectable. Activating it, by mouse or by the controller's A, FIXES the item in the
-			// preview; that is the whole gesture, with nothing to learn.
+			// THE NAME IS A CONTROL, NOT TEXT (the owner, 2026-09-20). It spans the rest of the row, so the
+			// mouse anywhere right of the star - on the name or on the grey details drawn over it - is on
+			// this Selectable, and the highlight can rest on it.
 			ImGuiMCP::SameLine();
 			const char* nameText = a_item.name.empty() ? a_item.editorID.c_str() : a_item.name.c_str();
 			const float nameStartX = ImGuiMCP::GetCursorPosX();
 			const float rowWidth = ImGuiMCP::GetContentRegionAvail().x;
-			if (ImGuiMCP::Selectable(nameText, g_previewItem == &a_item, 0,
-									 ImGuiMCP::ImVec2(rowWidth > 0.0F ? rowWidth : 0.0F, 0.0F)))
-			{
-				g_fixedItem = &a_item;
-			}
+			// 1.2.0: activating it (A, or a click) does nothing more - the preview follows the highlight by itself.
+			ImGuiMCP::Selectable(nameText, g_previewItem == &a_item, 0,
+								 ImGuiMCP::ImVec2(rowWidth > 0.0F ? rowWidth : 0.0F, 0.0F));
 			NoteRow(a_item);
 			// The details go back onto the same line, over the Selectable's band: plain text adds no item
 			// id, so the Selectable underneath keeps the hover and the click.
@@ -570,6 +792,7 @@ namespace UI
 		strings::Tick();
 		InitKinds();
 		SyncWithCatalogue();
+		NotePage();
 
 		if (!Catalog::Built())
 		{
@@ -606,6 +829,7 @@ namespace UI
 		}
 
 		ImGuiMCP::Spacing();
+		DrawLeftPaneSwitch();
 		// The amount is on each pile's own row now (2026-10-02), not one "How many" up here.
 		ImGuiMCP::Toggle(strings::TR("AIE_SearchEverywhere", "Search every plugin"), &g_searchEverywhere);
 		ImGuiMCP::Toggle(strings::TR("AIE_ShowEnchanted", "Show enchanted variants"), &g_showEnchanted);
@@ -627,8 +851,6 @@ namespace UI
 			SyncWithCatalogue();
 		}
 		ImGuiMCP::Spacing();
-		DrawPreviewSettings();
-		ImGuiMCP::Spacing();
 		ImGuiMCP::Separator();
 
 		// ---- Search everywhere: one list, no plugin picking ----
@@ -647,7 +869,7 @@ namespace UI
 			if (g_itemSearch[0] == '\0')
 			{
 				ImGuiMCP::TextDisabled("%s", strings::TR("AIE_TypeToSearch", "Type to search."));
-				DrawPreviewFloating();
+				DrawLeftPane();
 				return;
 			}
 
@@ -661,7 +883,7 @@ namespace UI
 				for (const auto* item : hits) { DrawItemRow(*item, true); }
 			}
 			ImGuiMCP::EndChild();
-			DrawPreviewFloating();
+			DrawLeftPane();
 
 			if (!g_status.empty())
 			{
@@ -758,7 +980,7 @@ namespace UI
 			}
 		}
 		ImGuiMCP::EndChild();
-		DrawPreviewFloating();
+		DrawLeftPane();
 
 		if (!g_status.empty())
 		{
@@ -775,8 +997,10 @@ namespace UI
 	{
 		strings::Tick();
 		SyncWithCatalogue();
+		NotePage();
 
 		ImGuiMCP::Text("%s", strings::TR("AIE_FavTitle", "Favourites"));
+		DrawLeftPaneSwitch();
 		ImGuiMCP::Separator();
 
 		const auto& all = favourites::All();
@@ -855,7 +1079,7 @@ namespace UI
 			for (const auto* item : items) { DrawItemRow(*item, true); }
 		}
 		ImGuiMCP::EndChild();
-		DrawPreviewFloating();
+		DrawLeftPane();
 
         if (!g_status.empty())
         {
@@ -869,6 +1093,32 @@ namespace UI
 	{
 		auto* form = RE::TESForm::LookupByID(a_formID);
 		g_previewItem = form ? Catalog::Find(form) : nullptr;
+		// held until the highlight (or a moving mouse) goes to another row
+		g_candidate = g_previewItem;
+	}
+
+	void SetLeftPaneFromTool(bool a_on) { g_toolLeftPane = a_on ? 1 : 0; }
+
+	LeftPaneState GetLeftPaneState()
+	{
+		LeftPaneState st;
+		st.supported = LeftPaneSupported();
+		st.on = g_leftPane;
+		st.iniDefault = settings::general::previewInLeftPane;
+		st.cardDrawn = g_cardDrawn.load();
+		st.mouseLeads = g_mouseLeads;
+		st.candidateFormID = g_candidate ? g_candidate->formID : 0;
+		st.previewFormID = g_previewItem ? g_previewItem->formID : 0;
+		for (int i = 0; i < 4; ++i) { st.card[i] = g_cardRect[i].load(); st.side[i] = g_sideRect[i].load(); st.square[i] = g_squareRect[i].load(); }
+		const auto info = iteminfo::Current();
+		st.infoReady = info.ready;
+		st.infoFormID = info.formID;
+		st.descriptionChars = info.description.size();
+		st.descriptionStart = info.description.substr(0, 120);
+		st.effectLines = info.effects.size();
+		st.armorRating = info.armorRating;
+		st.damage = info.damage;
+		return st;
 	}
 
 	std::uint32_t PreviewedFormID() { return g_previewItem ? g_previewItem->formID : 0; }

@@ -146,19 +146,29 @@ namespace DevBenchTool
 											UI::PreviewedFormID() != 0 ? "true" : "false", id, UI::PreviewedFormID()).c_str());
 				return;
 			}
-			// op=pane:<cx>,<cy>,<size> - move the floating box, in fractions of the screen.
-			if (has("pane:"))
+			// op=leftpane:<0|1> - flip the page's "Item preview in the left pane" switch (applied on the page's next frame).
+			if (has("leftpane:"))
 			{
-				const std::string v = After(args, "pane:");
-				float cx = 0.0F, cy = 0.0F, sz = 0.0F;
-				if (sscanf_s(v.c_str(), "%f,%f,%f", &cx, &cy, &sz) == 3)
-				{
-					settings::preview::paneX = std::clamp(cx, 0.05F, 0.95F);
-					settings::preview::paneY = std::clamp(cy, 0.05F, 0.95F);
-					settings::preview::paneSize = std::clamp(sz, 0.08F, 0.90F);
-				}
-				a_write(a_sink, std::format(R"({{"ok":true,"op":"pane","x":{:.2f},"y":{:.2f},"size":{:.2f}}})",
-											settings::preview::paneX, settings::preview::paneY, settings::preview::paneSize).c_str());
+				const bool on = After(args, "leftpane:").rfind("1", 0) == 0;
+				UI::SetLeftPaneFromTool(on);
+				a_write(a_sink, std::format(R"({{"ok":true,"op":"leftpane","requested":{}}})", on).c_str());
+				return;
+			}
+			// op=leftpanestate - the card as the page drew it last frame: the switch, the side list's and the card's
+			// rectangles (screen pixels), the row being rested on and the row shown, and what the details read.
+			if (has("leftpanestate"))
+			{
+				const auto st = UI::GetLeftPaneState();
+				a_write(a_sink, std::format(
+					R"({{"ok":true,"op":"leftpanestate","supported":{},"on":{},"iniDefault":{},"cardDrawn":{},"mouseLeads":{},)"
+					R"("candidate":"0x{:08X}","previewed":"0x{:08X}","side":[{:.0f},{:.0f},{:.0f},{:.0f}],"card":[{:.0f},{:.0f},{:.0f},{:.0f}],)"
+					R"("square":[{:.0f},{:.0f},{:.0f},{:.0f}],"infoReady":{},"infoFormID":"0x{:08X}","descriptionChars":{},"descriptionStart":"{}",)"
+					R"("effectLines":{},"armorRating":{:.1f},"damage":{},"previewEnabled":{},"menuOpen":{}}})",
+					st.supported, st.on, st.iniDefault, st.cardDrawn, st.mouseLeads, st.candidateFormID, st.previewFormID,
+					st.side[0], st.side[1], st.side[2], st.side[3], st.card[0], st.card[1], st.card[2], st.card[3],
+					st.square[0], st.square[1], st.square[2], st.square[3], st.infoReady, st.infoFormID, st.descriptionChars,
+					EscapeJson(st.descriptionStart), st.effectLines, st.armorRating, st.damage, preview::Enabled(),
+					preview::GetStatus().menuOpen).c_str());
 				return;
 			}
 			// op=norestore:<0|1> - diagnostic: leave the engine's paint on the back buffer.
@@ -307,8 +317,11 @@ namespace DevBenchTool
 			"INI (op=build afterwards applies a changed bShowUnnamed). No argument reports settings and whether the catalogue has been built yet. "
 			"The 3D preview: op=preview:<hex formID> makes the pane show that form with no mouse; "
 			"op=previewstate reports whether the helper menu is open, whether the engine holds a model "
-			"(managerModels), how many captures landed (renders) and the captured size; op=pane:<cx>,<cy>,<size> "
-			"moves the floating box in screen fractions; op=norestore:1 leaves the engine's paint on screen (diagnostic).\","
+			"(managerModels), how many captures landed (renders) and the captured size; "
+			"op=norestore:1 leaves the engine's paint on screen (diagnostic). "
+			"The left-pane card: op=leftpane:<0|1> flips the page's Item preview in the left pane switch; op=leftpanestate reports "
+			"the switch, the side list's and the card's screen rectangles, the row being rested on and the row shown (the card "
+			"follows the highlight after 0.15 s), and the description and figures read for it.\","
 			"\"inputSchema\":{\"type\":\"object\",\"properties\":{\"op\":{\"type\":\"string\"}}},"
 			"\"readOnly\":false"
 			"}";
