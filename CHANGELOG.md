@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.2.0 - 2026-10-23 - untested
+## 1.2.0 - 2026-10-23 - working
 
 ### Added
 - **Item preview in the left pane** (the owner, 2026-10-23, adapting the Witcher 3 Item Explorer's card). A switch on the
@@ -39,6 +39,32 @@
   old INI keeps them harmlessly. DevBench `op=pane:` is gone with them.
 - Clicking a row (or pressing A on its name) no longer fixes the item in the preview; turning and zooming no longer need
   a fixed item.
+
+### Fixed during the in-game test (before release)
+- A click on the card handed the focus to the page's outer window and the highlight was lost; it now goes back to the
+  list the highlight was in, so the D-pad carries on from the same row.
+- The card's preview is cropped to fit the whole model, both ways: a long sword showed only the middle of its blade, a
+  flower filled a fifteenth of the square. Zoom still enlarges the model inside the fitted crop.
+- A book whose first letter is an illuminated picture lost it ("ircine's Tale"); the letter is put back. Book text is cut
+  at about 500 characters, so the inventory details below it stay in view.
+- An effect with no description of its own (an enchantment's hidden second effect) is left out, as the game's own item
+  card does, instead of showing its bare name.
+- An arrow's weight (the engine has none for ammunition on SE) shows as "-" instead of "-1.0".
+- The square has a faint edge, so it reads as the preview's own area on the card.
+- DevBench `op=preview:` holds its item until the highlight or the mouse moves to another row (it was overridden on the
+  next frame).
+
+### Tested (2026-10-23, SE 1.5.97, Njordlinger Test, Apocrypha Menu Framework 2.3.0, three launches)
+- The card sits exactly over the side list (card and side rectangles both 35,66 - 752,1046 at 1920x1080); the switch is
+  on by default and comes back on when the menu is reopened; Search every plugin is on.
+- Six D-pad rows in 0.36 s loaded one model; a rested highlight is followed; the highlight wins over a mouse resting on
+  another row; A on a name does nothing to the preview, A on Add adds the item and the preview keeps following.
+- Book, skill book, spell tome, potion, ingredient, iron and enchanted sword, iron armour, soul gem, arrow and iron ingot
+  each show the model (no black square) with the description where there is one and the inventory details always.
+- A sword zoomed fully in and spun leaves no second copy and no smear; a click and the wheel over the card leave the
+  side list's selection and scroll unchanged; the Favourites page shows the same card.
+- Switching it off (a mouse click on the switch) closes the helper menu: End3D, no models held, the game unpaused.
+- Frames: the project's handoffs folder, evidence-2026-10-23-item-explorer-leftpane (20 frames).
 
 ## 1.1.4 - 2026-10-03 - working
 

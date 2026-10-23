@@ -103,6 +103,7 @@ namespace UI
 		// D-pad did is only resting where the player left it, and must not pull the preview back to the row under it.
 		bool                 g_mouseLeads = false;
 		ImGuiMCP::ImGuiWindow* g_pageWindow = nullptr;   // the page's window, to hand the focus back to from the card
+		ImGuiMCP::ImGuiWindow* g_listWindow = nullptr;   // the list window the highlight was last in (preferred)
 		// for the DevBench tool: where the card, the side list and the square were last frame
 		std::atomic<float>   g_cardRect[4]{}, g_sideRect[4]{}, g_squareRect[4]{};
 		std::atomic<bool>    g_cardDrawn{ false };
@@ -320,6 +321,8 @@ namespace UI
 		// older frameworks do not export it, and a row reads just as well.
 		// The last widget drawn is the one under the cursor or under D-pad focus: make its row the
 		// previewed one. Called after each of a row's controls, so any of them counts.
+		bool LeftPaneSupported();   // below, with the card
+
 		void NoteRow(const Catalog::Item& a_item)
 		{
 			// The row the player was handling takes the highlight back, on the frame after circle.
@@ -332,7 +335,13 @@ namespace UI
 			// the two drives the preview is decided once, after the list (ResolvePreview), so the request never changes
 			// several times within a frame - that unloads and reloads the engine's model and no capture ever lands.
 			if (ImGuiMCP::IsItemHovered()) { g_hoverItem = &a_item; }
-			if (ImGuiMCP::IsItemFocused() && g_focusItem == nullptr) { g_focusItem = &a_item; }
+			if (ImGuiMCP::IsItemFocused() && g_focusItem == nullptr)
+			{
+				g_focusItem = &a_item;
+				// the list's own (child) window: the card hands the focus back HERE, so FocusWindow restores the row the
+				// highlight was on (focusing the page's outer window lost the highlight - first in-game run, 2026-10-23)
+				if (LeftPaneSupported()) { g_listWindow = ImGuiMCP::GetCurrentWindow(); }
+			}
 
 			// R3 ON THE HIGHLIGHTED ROW hands the preview box the sticks (the owner, 2026-09-19).
 			// Asked of the row that has the highlight, so the item being handled is the one the
@@ -357,7 +366,7 @@ namespace UI
 			"igBringWindowToDisplayFront", "igGetCurrentWindow", "igFocusWindow", "igIsWindowFocused",
 			"igGetWindowPos", "igGetWindowSize", "igPushStyleVar_Float", "igPushStyleVar_Vec2", "igPopStyleVar",
 			"igPushStyleColor_Vec4", "igPopStyleColor", "igGetStyleColorVec4", "igGetTime", "igGetFrameCount",
-			"igSetCursorScreenPos", "igTextUnformatted", "igGetTextLineHeightWithSpacing"
+			"igSetCursorScreenPos", "igTextUnformatted", "igGetTextLineHeightWithSpacing", "ImDrawList_AddRect"
 		};
 
 		using GetSideListRect_t = bool (*)(float*, float*, float*, float*);
@@ -441,8 +450,13 @@ namespace UI
 			// while the sticks turn the model the highlight cannot move, and the previewed item stays
 			if (preview::Handling()) { return; }
 
+			// A new candidate only when the leading input's row CHANGES - so an item put in the card another way (the
+			// DevBench tool's op=preview) stays until the highlight or the mouse actually moves to another row.
+			static const Catalog::Item* s_lastWant = nullptr;
 			const Catalog::Item* want = g_mouseLeads ? hover : focus;
-			if (want && want != g_candidate)
+			const bool moved = want != s_lastWant;
+			s_lastWant = want;
+			if (want && moved && want != g_candidate)
 			{
 				g_candidate = want;
 				g_candidateSince = LeftPaneSupported() ? ImGuiMCP::GetTime() : 0.0;
@@ -521,7 +535,10 @@ namespace UI
 			if (!info.teachesSkill.empty()) { ImGuiMCP::Text("%s: %s", strings::TR("AIE_TeachesSkill", "Teaches the skill"), info.teachesSkill.c_str()); }
 			char value[32] = "-";
 			if (a_item.value >= 0) { std::snprintf(value, sizeof(value), "%d", a_item.value); }
-			ImGuiMCP::Text("%s %.1f    %s %s", strings::TR("AIE_Weight", "Weight"), a_item.weight, strings::TR("AIE_Value", "Value"), value);
+			// the engine answers -1 for a form with no weight of its own (arrows on SE): shown as "-", not "-1.0"
+			char weight[32] = "-";
+			if (a_item.weight >= 0.0F) { std::snprintf(weight, sizeof(weight), "%.1f", a_item.weight); }
+			ImGuiMCP::Text("%s %s    %s %s", strings::TR("AIE_Weight", "Weight"), weight, strings::TR("AIE_Value", "Value"), value);
 			if (a_item.questItem) { ImGuiMCP::TextDisabled("%s", strings::TR("AIE_QuestTag", "[quest]")); }
 			ImGuiMCP::TextDisabled("%s  0x%08X", a_item.editorID.c_str(), a_item.formID);
 			ImGuiMCP::PopTextWrapPos();
@@ -600,7 +617,7 @@ namespace UI
 
 				// THE SQUARE: as wide as the card, unless that would leave the details too little room
 				const ImGuiMCP::ImVec2 avail = ImGuiMCP::GetContentRegionAvail();
-				const float side = (std::max)(64.0F, (std::min)(avail.x, avail.y * 0.62F));
+				const float side = (std::max)(64.0F, (std::min)(avail.x, avail.y * 0.52F));
 				const ImGuiMCP::ImVec2 at = ImGuiMCP::GetCursorScreenPos();
 				const float qx0 = at.x + (avail.x - side) * 0.5F, qy0 = at.y;
 				const float qx1 = qx0 + side, qy1 = qy0 + side;
@@ -613,6 +630,8 @@ namespace UI
 				preview::Heartbeat();
 				preview::Request(item && item->form ? item->form : nullptr, side, side);
 				preview::DrawImage(dl, qx0, qy0, qx1, qy1);
+				// a faint edge, so the square reads as the preview's own area against the card
+				ImGuiMCP::ImDrawListManager::AddRect(dl, ImGuiMCP::ImVec2{ qx0, qy0 }, ImGuiMCP::ImVec2{ qx1, qy1 }, Col(255, 255, 255, 60), 0.0F, 0, 1.0F);
 				if (!preview::Available())
 				{
 					ImGuiMCP::TextDisabled("%s", strings::TR("AIE_PreviewUnavailable", "The 3D preview is not available on this runtime."));
@@ -637,7 +656,7 @@ namespace UI
 				if (g_pageWindow && ImGuiMCP::IsWindowFocused(ImGuiMCP::ImGuiFocusedFlags_RootAndChildWindows) &&
 					!ImGuiMCP::IsAnyItemActive())
 				{
-					ImGuiMCP::FocusWindow(g_pageWindow, 0);
+					ImGuiMCP::FocusWindow(g_listWindow ? g_listWindow : g_pageWindow, 0);
 				}
 				g_cardDrawn = true;
 			}

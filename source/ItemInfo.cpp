@@ -5,6 +5,7 @@
 #include "utils/Logger.h"
 
 #include <atomic>
+#include <cctype>
 #include <cmath>
 #include <mutex>
 
@@ -19,7 +20,7 @@ namespace iteminfo
 
 		// A book's text is the page markup the game's book menu reads: <font>, <p>, <img>, [pagebreak]. The card shows
 		// the words only, and only the start of a long book - the rest is what the book menu is for.
-		constexpr std::size_t kBookChars = 1200;
+		constexpr std::size_t kBookChars = 500;   // short enough that the inventory details below still show
 
 		std::string StripMarkup(const std::string& a_in)
 		{
@@ -30,7 +31,20 @@ namespace iteminfo
 			{
 				const char c = a_in[i];
 				if (inTag) { if (c == '>') { inTag = false; } continue; }
-				if (c == '<') { inTag = true; continue; }
+				if (c == '<')
+				{
+					// A book's first letter is often a picture (an illuminated capital, <img src='...Illuminated_Letters/V_...'>):
+					// put the letter back, or the text starts "ircine's Tale" (first in-game run, 2026-10-23).
+					const std::size_t end = a_in.find('>', i);
+					const std::string tag = a_in.substr(i, end == std::string::npos ? std::string::npos : end - i);
+					if (const std::size_t at = tag.find("Illuminated_Letters/"); at != std::string::npos)
+					{
+						const std::size_t l = at + 20;
+						if (l + 1 < tag.size() && std::isalpha(static_cast<unsigned char>(tag[l])) && tag[l + 1] == '_') { out += tag[l]; }
+					}
+					inTag = true;
+					continue;
+				}
 				if (c == '[' && a_in.compare(i, 11, "[pagebreak]") == 0) { out += "\n"; i += 10; continue; }
 				if (c == '\r') { continue; }
 				out += c;
@@ -76,11 +90,8 @@ namespace iteminfo
 				if (!effect || !effect->baseEffect) { continue; }
 				const char* raw = effect->baseEffect->magicItemDescription.c_str();
 				std::string line = raw ? raw : "";
-				if (line.empty())
-				{
-					const char* name = effect->baseEffect->GetFullName();
-					line = name ? name : "";
-				}
+				// an effect with no description is left out, as the game's own item card does (an enchantment's hidden
+				// second effect read "Fire Damage" on its own line - first in-game run, 2026-10-23)
 				if (line.empty()) { continue; }
 				ReplaceAll(line, "<mag>", Number(effect->GetMagnitude()));
 				ReplaceAll(line, "<dur>", std::to_string(effect->GetDuration()));

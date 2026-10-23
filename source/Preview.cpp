@@ -600,6 +600,26 @@ namespace preview
 				}
 			}
 		}
+		// THE CROP FITS THE WHOLE MODEL (1.2.0, first in-game run 2026-10-23: a long sword showed only the middle of its
+		// blade). The square used to show exactly its own size in screen pixels, so anything the engine painted larger
+		// than the square was cut off. The crop is now at least the model's painted size at zoom 1 - the zoom the player
+		// has applied is taken back out, so zooming still enlarges the model inside a crop that stays put.
+		float fitSide = innerW;
+		{
+			auto& rtf = inv->GetRuntimeData();
+			if (paintedSide > 0.0F && !rtf.loadedModels.empty())
+			{
+				if (auto* mf = rtf.loadedModels.back().spModel.get())
+				{
+					const float applied = (g_baseRotateValid && g_baseScale > 0.0F && mf->local.scale > 0.0F) ? mf->local.scale / g_baseScale : 1.0F;
+					// fitted both ways: a small item (an ingredient, a ring) is enlarged to fill the square, a long one
+					// shrunk to fit it (second run: a flower filled a fifteenth of the square at a crop of at least the square)
+					fitSide = (std::max)(48.0F, paintedSide / applied * 1.1F);
+				}
+			}
+			const auto szf = RE::BSGraphics::Renderer::GetScreenSize();
+			if (szf.height > 0) { fitSide = (std::min)(fitSide, static_cast<float>((std::min)(szf.width, szf.height))); }
+		}
 		const float side = (std::max)({ innerW, innerH, paintedSide });
 		const float captureW = side * kSafetyMargin, captureH = side * kSafetyMargin;
 
@@ -772,8 +792,8 @@ namespace preview
 		// actually landed on the frame.
 		g_capturedW = captureW;
 		g_capturedH = captureH;
-		g_innerW = innerW;
-		g_innerH = innerH;
+		g_innerW = fitSide;   // the crop the page shows, scaled into its square (see THE CROP FITS THE WHOLE MODEL)
+		g_innerH = fitSide;
 		// No offset of its own: the capture IS the screen, so the model's projected position is its
 		// position in the texture.
 		g_modelInTexX = g_screenX.load() - settings::preview::offsetX;
